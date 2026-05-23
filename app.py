@@ -8,20 +8,25 @@ import re
 
 
 def linkify(text: str) -> str:
-    """Convert [label](url) and bare URLs in text to clickable HTML links."""
-    # Markdown-style links first: [label](url)
+    """Convert [label](url) and bare URLs to clickable HTML. Safe against double-conversion."""
+    # Convert [label](url) markdown links first
     text = re.sub(
         r'\[([^\]]+)\]\((https?://[^\)\s]+)\)',
-        r'<a href="\2" target="_blank" rel="noopener" style="color:#007AFF;">\1</a>',
+        r'<a href="\2" target="_blank">\1</a>',
         text
     )
-    # Bare URLs (not already inside an href)
-    text = re.sub(
-        r'(?<!=")(?<!\()(https?://[^\s<>"\']+)',
-        r'<a href="\1" target="_blank" rel="noopener" style="color:#007AFF;">\1</a>',
-        text
-    )
-    return text
+    # Convert bare URLs — split around existing <a> tags so we never double-process
+    parts = re.split(r'(<a\b[^>]*>.*?</a>)', text, flags=re.DOTALL)
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2 == 0:  # plain text node, not already inside an <a>
+            part = re.sub(
+                r'(https?://[^\s<>"\']+)',
+                r'<a href="\1" target="_blank">\1</a>',
+                part
+            )
+        out.append(part)
+    return ''.join(out)
 
 st.set_page_config(page_title="rMG Weekly", layout="wide", page_icon="📋")
 
@@ -152,12 +157,8 @@ html, body, [class*="css"] {
 /* Checkboxes */
 .stCheckbox { margin-bottom: 0 !important; }
 
-/* Done checkboxes — targeted via wrapper div */
-.done-cb input[type="checkbox"] {
-    accent-color: #34C759 !important;
-    width: 16px !important;
-    height: 16px !important;
-}
+/* Checkboxes base size */
+input[type="checkbox"] { width: 16px !important; height: 16px !important; }
 
 /* In-progress row — subtle left accent */
 .item-inprog {
@@ -188,6 +189,21 @@ html, body, [class*="css"] {
     .block-container { padding-left: 0.5rem; padding-right: 0.5rem; }
 }
 </style>
+<script>
+(function() {
+    function greenDone() {
+        document.querySelectorAll('[data-testid="stCheckbox"]').forEach(function(cb) {
+            var p = cb.querySelector('p');
+            if (p && p.textContent.trim() === 'Done') {
+                var inp = cb.querySelector('input[type="checkbox"]');
+                if (inp) inp.style.accentColor = '#34C759';
+            }
+        });
+    }
+    greenDone();
+    new MutationObserver(greenDone).observe(document.body, { childList: true, subtree: true });
+})();
+</script>
 """, unsafe_allow_html=True)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -380,9 +396,7 @@ def render_items(items_df, can_edit, add_key):
             with c_txt:
                 edited_text = st.text_input("edit", value=row["item"], key=f"edit_val_{item_id}", label_visibility="collapsed")
             with c_done:
-                st.markdown('<div class="done-cb">', unsafe_allow_html=True)
                 st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=True)
-                st.markdown('</div>', unsafe_allow_html=True)
             with c_prog:
                 st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=True)
             with c_save:
@@ -425,9 +439,7 @@ def render_items(items_df, can_edit, add_key):
             with c_txt:
                 st.markdown(f'<div style="{txt_style}">{linkify(row["item"])}</div>', unsafe_allow_html=True)
             with c_done:
-                st.markdown('<div class="done-cb">', unsafe_allow_html=True)
                 new_done = st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=not is_current_week)
-                st.markdown('</div>', unsafe_allow_html=True)
             with c_prog:
                 new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=not is_current_week)
 
