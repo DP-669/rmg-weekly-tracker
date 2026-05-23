@@ -69,7 +69,7 @@ html, body, [class*="css"] {
     color: #8E8E93;
 }
 
-/* Buttons */
+/* Default buttons */
 .stButton > button {
     border-radius: 7px !important;
     font-size: 14px !important;
@@ -82,6 +82,42 @@ html, body, [class*="css"] {
 .stButton > button:hover {
     border-color: #007AFF !important;
     color: #007AFF !important;
+}
+
+/* Edit button — small yellow circle */
+.btn-edit .stButton > button {
+    width: 24px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    background: #FFD60A !important;
+    border: none !important;
+    color: transparent !important;
+    font-size: 0 !important;
+}
+.btn-edit .stButton > button:hover {
+    background: #FFC200 !important;
+    border: none !important;
+}
+
+/* Delete button — small grey circle, red on hover */
+.btn-del .stButton > button {
+    width: 24px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    background: #E5E5EA !important;
+    border: none !important;
+    color: #8E8E93 !important;
+    font-size: 13px !important;
+    line-height: 1 !important;
+}
+.btn-del .stButton > button:hover {
+    background: #FF3B30 !important;
+    border: none !important;
+    color: white !important;
 }
 
 /* Radio horizontal alignment */
@@ -325,10 +361,15 @@ def render_items(items_df, can_edit, add_key):
             with c_prog:
                 new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=not is_current_week)
             with c_edit:
-                if can_edit and st.button("Edit", key=f"edit_btn_{item_id}", use_container_width=True):
-                    st.session_state[f"edit_{item_id}"] = True
-                    st.rerun()
+                if can_edit:
+                    st.markdown('<div class="btn-edit">', unsafe_allow_html=True)
+                    if st.button("●", key=f"edit_btn_{item_id}", use_container_width=True):
+                        st.session_state[f"edit_{item_id}"] = True
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
             with c_del:
+                if can_edit:
+                    st.markdown('<div class="btn-del">', unsafe_allow_html=True)
                 if can_edit and st.button("×", key=f"del_{item_id}", use_container_width=True):
                     try:
                         ws, err = get_sheet()
@@ -338,6 +379,8 @@ def render_items(items_df, can_edit, add_key):
                             st.rerun()
                     except Exception as e:
                         st.error(str(e))
+                if can_edit:
+                    st.markdown('</div>', unsafe_allow_html=True)
 
             # Status update
             if is_current_week:
