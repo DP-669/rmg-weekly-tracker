@@ -107,6 +107,7 @@ html, body, [class*="css"] {
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 TEAM        = ["Vesna", "Craig", "Damir"]
+RMG_PERSON  = "rMG"
 SCOPES      = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 SHEET_NAME  = "rMG Weekly Tracker"
 COLS        = ["id", "person", "week_start", "type", "item", "status", "created_at", "updated_at"]
@@ -274,12 +275,11 @@ for person in TEAM:   # Vesna, Craig, Damir
         status    = row.get("status", "pending")
         is_done   = (status == "done")
         is_prog   = (status == "in_progress")
-        text_style = "text-decoration:line-through;color:#8E8E93;" if is_done else ""
 
         col_text, col_done, col_prog = st.columns([7, 1.2, 1.8])
 
         with col_text:
-            st.markdown(f'<div style="{text_style}padding-top:6px;">{row["item"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="padding-top:6px;">{row["item"]}</div>', unsafe_allow_html=True)
 
         with col_done:
             new_done = st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=not is_current_week)
@@ -337,3 +337,71 @@ for person in TEAM:   # Vesna, Craig, Damir
                     st.rerun()
             except Exception as e:
                 st.error(str(e))
+
+# ── rMG section (shared, anyone can add) ─────────────────────────────────────
+st.markdown('<div class="person-header">rMG</div>', unsafe_allow_html=True)
+
+rmg_items = week_df[week_df["person"] == RMG_PERSON] if not week_df.empty else pd.DataFrame(columns=COLS)
+
+for _, row in rmg_items.iterrows():
+    item_id = row["id"]
+    status  = row.get("status", "pending")
+    is_done = (status == "done")
+    is_prog = (status == "in_progress")
+
+    col_text, col_done, col_prog = st.columns([7, 1.2, 1.8])
+    with col_text:
+        st.markdown(f'<div style="padding-top:6px;">{row["item"]}</div>', unsafe_allow_html=True)
+    with col_done:
+        new_done = st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=not is_current_week)
+    with col_prog:
+        new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=not is_current_week)
+
+    if is_current_week:
+        if new_done and not is_done:
+            new_status = "done"
+        elif new_prog and not is_prog and not new_done:
+            new_status = "in_progress"
+        elif not new_done and not new_prog and status in ("done", "in_progress"):
+            new_status = "pending"
+        else:
+            new_status = status
+
+        if new_status != status:
+            try:
+                ws, err = get_sheet()
+                if not err:
+                    update_row(ws, item_id, "status", new_status)
+                    invalidate_cache()
+                    st.rerun()
+            except Exception as e:
+                st.error(str(e))
+
+if is_current_week:
+    new_rmg = st.text_input(
+        "add_rmg",
+        placeholder="+ Add rMG item…",
+        label_visibility="collapsed",
+        key="new_rMG",
+    )
+    if new_rmg:
+        try:
+            ws, err = get_sheet()
+            if err:
+                st.error(f"Sheet error: {err}")
+            else:
+                append_row(ws, {
+                    "id": str(uuid.uuid4())[:8],
+                    "person": RMG_PERSON,
+                    "week_start": current_week_str,
+                    "type": "item",
+                    "item": new_rmg,
+                    "status": "pending",
+                    "created_at": date.today().isoformat(),
+                    "updated_at": date.today().isoformat(),
+                })
+                invalidate_cache()
+                st.session_state["new_rMG"] = ""
+                st.rerun()
+        except Exception as e:
+            st.error(str(e))
