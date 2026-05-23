@@ -95,15 +95,16 @@ def format_week(monday: date) -> str:
 
 
 # ── Google Sheets connection ───────────────────────────────────────────────────
-def get_sheet():
-    """Connect to Google Sheets. Returns (sheet, None) or (None, error_str)."""
+@st.cache_resource
+def _get_worksheet():
+    """Create and cache the gspread worksheet object for the whole session."""
     try:
         creds_info = dict(st.secrets["GOOGLE"])
         creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
         client = gspread.authorize(creds)
         sh = client.open(SHEET_NAME)
         ws = sh.sheet1
-        # Ensure header row exists
+        # Ensure header row exists — done once at startup, not on every call
         existing = ws.row_values(1)
         if existing != COLS:
             ws.insert_row(COLS, 1)
@@ -114,9 +115,14 @@ def get_sheet():
         return None, str(e)
 
 
-@st.cache_data(ttl=30)
+def get_sheet():
+    """Return the cached worksheet. No API calls on repeated invocations."""
+    return _get_worksheet()
+
+
+@st.cache_data(ttl=60)
 def load_data(_ws_key: str):
-    """Load all rows from sheet. _ws_key is just a cache-buster string."""
+    """Load all rows from sheet. Cache for 60 s; _ws_key busts the cache on writes."""
     try:
         sheet, err = get_sheet()
         if err:
