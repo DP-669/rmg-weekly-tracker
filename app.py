@@ -8,7 +8,7 @@ import uuid
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="rMG Weekly", layout="wide", page_icon="📋")
 
-# ── Google Fonts + global CSS ─────────────────────────────────────────────────
+# ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
@@ -16,44 +16,56 @@ st.markdown("""
 html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif !important;
     background-color: #F2F2F7 !important;
+    font-size: 15px !important;
 }
 #MainMenu, header, footer { visibility: hidden; }
-.block-container { padding-top: 1.5rem; }
+.block-container { padding-top: 1.2rem; max-width: 1100px; }
 
-/* Cards */
+/* Task cards */
 .task-card {
     background: white;
-    border-radius: 12px;
-    border: 1px solid #E8E8E8;
-    padding: 12px 14px;
-    margin-bottom: 8px;
+    border-radius: 10px;
+    border: 1px solid #E5E5EA;
+    padding: 10px 12px;
+    margin-bottom: 6px;
 }
 .task-card-active {
     background: #F0F7FF;
-    border-radius: 12px;
-    border: 1px solid #C7E0FF;
-    padding: 12px 14px;
-    margin-bottom: 8px;
+    border-radius: 10px;
+    border: 1px solid #BAD7FF;
+    padding: 10px 12px;
+    margin-bottom: 6px;
 }
-/* Section headers */
+
+/* Section labels */
 .section-label {
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
     color: #8E8E93;
-    margin: 14px 0 6px 0;
+    margin: 12px 0 4px 0;
 }
 
-/* Status buttons */
+/* Column headers */
+.col-header {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1C1C1E;
+    padding: 6px 0 4px 0;
+    border-bottom: 2px solid #007AFF;
+    margin-bottom: 10px;
+}
+
+/* Buttons — only edit/delete, keep them small */
 .stButton > button {
-    border-radius: 8px !important;
+    border-radius: 7px !important;
     font-family: 'DM Sans', sans-serif !important;
-    font-size: 12px !important;
-    padding: 4px 10px !important;
+    font-size: 13px !important;
+    padding: 3px 8px !important;
     height: auto !important;
-    min-height: 28px !important;
-    border: 1px solid #E8E8E8 !important;
+    min-height: 26px !important;
+    border: 1px solid #E5E5EA !important;
     background: white !important;
     color: #3C3C43 !important;
 }
@@ -62,14 +74,27 @@ html, body, [class*="css"] {
     color: #007AFF !important;
 }
 
-/* Column header */
-.col-header {
-    font-size: 16px;
-    font-weight: 600;
-    color: #1C1C1E;
-    padding: 8px 0 4px 0;
-    border-bottom: 2px solid #007AFF;
-    margin-bottom: 12px;
+/* Status selectbox — compact */
+.stSelectbox > div > div {
+    font-size: 13px !important;
+    min-height: 30px !important;
+    padding: 2px 8px !important;
+    border-radius: 7px !important;
+}
+
+/* Text inputs */
+.stTextInput > div > div > input {
+    font-size: 14px !important;
+    border-radius: 8px !important;
+}
+
+/* Stack columns on iPad / narrow screens */
+@media (max-width: 900px) {
+    [data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -244,8 +269,7 @@ with st.sidebar:
 
 
 # ── Main header ───────────────────────────────────────────────────────────────
-st.markdown(f"# 📋 rMG Weekly")
-st.markdown(f"**Week of {format_week(st.session_state['current_week'])}**")
+st.markdown(f"## rMG Weekly &nbsp;&nbsp;<span style='font-size:15px;font-weight:400;color:#8E8E93;'>Week of {format_week(st.session_state['current_week'])}</span>", unsafe_allow_html=True)
 st.markdown("---")
 
 # ── Load data ─────────────────────────────────────────────────────────────────
@@ -325,37 +349,34 @@ def render_task(row, is_active_col: bool, read_only: bool):
                     except Exception as e:
                         st.error(str(e))
 
-    # Status row
+    # Status — single compact dropdown
     if not read_only:
-        st.markdown('<div style="margin-top:6px;">', unsafe_allow_html=True)
-        status_cols = st.columns(4)
-        for i, s in enumerate(STATUSES):
-            with status_cols[i]:
-                current = row.get("status", "pending")
-                label = STATUS_LABELS[s]
-                is_selected = (current == s)
-                btn_style = f"background:#007AFF!important;color:white!important;border-color:#007AFF!important;" if is_selected else ""
-                if st.button(
-                    label,
-                    key=f"status_{item_id}_{s}",
-                    help=f"Set {label}",
-                    use_container_width=True,
-                ):
-                    if not is_selected:
-                        try:
-                            sheet, err = get_sheet()
-                            if err:
-                                st.error(f"Sheet error: {err}")
-                            else:
-                                update_row(sheet, item_id, "status", s)
-                                invalidate_cache()
-                                st.rerun()
-                        except Exception as e:
-                            st.error(str(e))
-        st.markdown('</div>', unsafe_allow_html=True)
+        current_status = row.get("status", "pending")
+        sel_col, _ = st.columns([2, 3])
+        with sel_col:
+            new_status = st.selectbox(
+                "status",
+                STATUSES,
+                index=STATUSES.index(current_status) if current_status in STATUSES else 0,
+                key=f"status_sel_{item_id}",
+                label_visibility="collapsed",
+                format_func=lambda s: STATUS_LABELS[s],
+            )
+        if new_status != current_status:
+            try:
+                sheet, err = get_sheet()
+                if err:
+                    st.error(f"Sheet error: {err}")
+                else:
+                    update_row(sheet, item_id, "status", new_status)
+                    invalidate_cache()
+                    st.rerun()
+            except Exception as e:
+                st.error(str(e))
     else:
         current_status = row.get("status", "pending")
-        st.caption(f"Status: {STATUS_LABELS.get(current_status, current_status)}")
+        color = STATUS_COLORS.get(current_status, "#8E8E93")
+        st.markdown(f'<span style="font-size:12px;color:{color};">● {STATUS_LABELS.get(current_status, current_status)}</span>', unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -378,7 +399,7 @@ for person, col in columns_map.items():
         )
 
         # ── Plans section ──────────────────────────────────────────────────────
-        st.markdown('<div class="section-label">📌 Plans</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-label">Plans</div>', unsafe_allow_html=True)
         plans = person_df[person_df["type"] == "plan"] if not person_df.empty else pd.DataFrame(columns=COLS)
         if plans.empty:
             st.caption("_No plans yet_")
@@ -416,7 +437,7 @@ for person, col in columns_map.items():
                     st.error(str(e))
 
         # ── Accomplishments section ────────────────────────────────────────────
-        st.markdown('<div class="section-label">✅ Accomplishments</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-label">Accomplishments</div>', unsafe_allow_html=True)
         accoms = person_df[person_df["type"] == "accomplishment"] if not person_df.empty else pd.DataFrame(columns=COLS)
         if accoms.empty:
             st.caption("_No accomplishments yet_")
