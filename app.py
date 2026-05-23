@@ -98,6 +98,13 @@ html, body, [class*="css"] {
 /* Checkboxes */
 .stCheckbox { margin-bottom: 0 !important; }
 
+/* Done checkboxes — always the 2nd column in item rows — green */
+[data-testid="stHorizontalBlock"] [data-testid="column"]:nth-child(2) input[type="checkbox"] {
+    accent-color: #34C759 !important;
+    width: 16px !important;
+    height: 16px !important;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .block-container { padding-left: 0.5rem; padding-right: 0.5rem; }
