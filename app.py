@@ -4,6 +4,24 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 from datetime import date, timedelta
 import uuid
+import re
+
+
+def linkify(text: str) -> str:
+    """Convert [label](url) and bare URLs in text to clickable HTML links."""
+    # Markdown-style links first: [label](url)
+    text = re.sub(
+        r'\[([^\]]+)\]\((https?://[^\)\s]+)\)',
+        r'<a href="\2" target="_blank" rel="noopener" style="color:#007AFF;">\1</a>',
+        text
+    )
+    # Bare URLs (not already inside an href)
+    text = re.sub(
+        r'(?<!=")(?<!\()(https?://[^\s<>"\']+)',
+        r'<a href="\1" target="_blank" rel="noopener" style="color:#007AFF;">\1</a>',
+        text
+    )
+    return text
 
 st.set_page_config(page_title="rMG Weekly", layout="wide", page_icon="📋")
 
@@ -134,11 +152,18 @@ html, body, [class*="css"] {
 /* Checkboxes */
 .stCheckbox { margin-bottom: 0 !important; }
 
-/* Done checkboxes — 3rd column (after number + text) — green */
-[data-testid="stHorizontalBlock"] [data-testid="column"]:nth-child(3) input[type="checkbox"] {
+/* Done checkboxes — targeted via wrapper div */
+.done-cb input[type="checkbox"] {
     accent-color: #34C759 !important;
     width: 16px !important;
     height: 16px !important;
+}
+
+/* In-progress row — subtle left accent */
+.item-inprog {
+    border-left: 3px solid #FF9500 !important;
+    padding-left: 6px !important;
+    border-radius: 0 6px 6px 0 !important;
 }
 
 /* Expander styling */
@@ -334,6 +359,13 @@ week_df = df[df["week_start"] == current_week_str].copy() if not df.empty else p
 # ── Item renderer ─────────────────────────────────────────────────────────────
 def render_items(items_df, can_edit, add_key):
     """Render a list of items with numbering, status checkboxes, edit and delete."""
+    # Sort: in_progress → pending → done
+    if not items_df.empty:
+        _order = {"in_progress": 0, "pending": 1, "done": 2}
+        items_df = items_df.copy()
+        items_df["_s"] = items_df["status"].map(lambda s: _order.get(s, 1))
+        items_df = items_df.sort_values("_s").drop(columns=["_s"])
+
     for i, (_, row) in enumerate(items_df.iterrows(), 1):
         item_id  = row["id"]
         status   = row.get("status", "pending")
@@ -348,7 +380,9 @@ def render_items(items_df, can_edit, add_key):
             with c_txt:
                 edited_text = st.text_input("edit", value=row["item"], key=f"edit_val_{item_id}", label_visibility="collapsed")
             with c_done:
+                st.markdown('<div class="done-cb">', unsafe_allow_html=True)
                 st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=True)
+                st.markdown('</div>', unsafe_allow_html=True)
             with c_prog:
                 st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=True)
             with c_save:
@@ -368,15 +402,37 @@ def render_items(items_df, can_edit, add_key):
                     st.rerun()
 
         else:
+            # Status-based row styling
+            if is_prog:
+                row_class = "item-inprog"
+            else:
+                row_class = ""
+
+            # Text style by status
+            if is_done:
+                txt_style = "padding-top:6px; color:#8E8E93;"
+            elif is_prog:
+                txt_style = "padding-top:6px; color:#1C1C1E; font-weight:500;"
+            else:
+                txt_style = "padding-top:6px;"
+
+            if row_class:
+                st.markdown(f'<div class="{row_class}">', unsafe_allow_html=True)
+
             c_n, c_txt, c_done, c_prog, c_edit, c_del = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.6])
             with c_n:
                 st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:14px;">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
-                st.markdown(f'<div style="padding-top:6px;">{row["item"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="{txt_style}">{linkify(row["item"])}</div>', unsafe_allow_html=True)
             with c_done:
+                st.markdown('<div class="done-cb">', unsafe_allow_html=True)
                 new_done = st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=not is_current_week)
+                st.markdown('</div>', unsafe_allow_html=True)
             with c_prog:
                 new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=not is_current_week)
+
+            if row_class:
+                st.markdown('</div>', unsafe_allow_html=True)
             with c_edit:
                 if can_edit:
                     st.markdown('<div class="btn-edit">', unsafe_allow_html=True)
