@@ -182,6 +182,9 @@ if "active_user" not in st.session_state:
     st.session_state["active_user"] = "Damir"
 if "current_week" not in st.session_state:
     st.session_state["current_week"] = get_monday(date.today())
+for _p in TEAM + ["rMG"]:
+    if f"input_n_{_p}" not in st.session_state:
+        st.session_state[f"input_n_{_p}"] = 0
 
 current_week     = st.session_state["current_week"]
 current_week_str = current_week.isoformat()
@@ -310,11 +313,12 @@ for person in TEAM:   # Vesna, Craig, Damir
 
     # Add item input — only for your own section, current week
     if is_me and is_current_week:
+        n = st.session_state[f"input_n_{person}"]
         new_item = st.text_input(
             "add",
             placeholder="+ Add item…",
             label_visibility="collapsed",
-            key=f"new_{person}",
+            key=f"new_{person}_{n}",
         )
         if new_item:
             try:
@@ -333,7 +337,7 @@ for person in TEAM:   # Vesna, Craig, Damir
                         "updated_at": date.today().isoformat(),
                     })
                     invalidate_cache()
-                    st.session_state[f"new_{person}"] = ""
+                    st.session_state[f"input_n_{person}"] += 1
                     st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -378,11 +382,12 @@ for _, row in rmg_items.iterrows():
                 st.error(str(e))
 
 if is_current_week:
+    n_rmg = st.session_state["input_n_rMG"]
     new_rmg = st.text_input(
         "add_rmg",
         placeholder="+ Add rMG item…",
         label_visibility="collapsed",
-        key="new_rMG",
+        key=f"new_rMG_{n_rmg}",
     )
     if new_rmg:
         try:
@@ -401,7 +406,7 @@ if is_current_week:
                     "updated_at": date.today().isoformat(),
                 })
                 invalidate_cache()
-                st.session_state["new_rMG"] = ""
+                st.session_state["input_n_rMG"] += 1
                 st.rerun()
         except Exception as e:
             st.error(str(e))
