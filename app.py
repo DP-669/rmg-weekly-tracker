@@ -184,12 +184,18 @@ def update_row(ws, row_id: str, field: str, value: str):
         ws.update_cell(cell.row, COLS.index("updated_at") + 1, date.today().isoformat())
 
 
+def delete_row(ws, row_id: str):
+    cell = ws.find(row_id, in_column=1)
+    if cell:
+        ws.delete_rows(cell.row)
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 if "active_user" not in st.session_state:
     st.session_state["active_user"] = "Damir"
 if "current_week" not in st.session_state:
     st.session_state["current_week"] = get_monday(date.today())
-for _p in TEAM + ["rMG"]:
+for _p in TEAM + [RMG_PERSON]:
     if f"input_n_{_p}" not in st.session_state:
         st.session_state[f"input_n_{_p}"] = 0
 
@@ -272,60 +278,96 @@ elif load_err:
 week_df = df[df["week_start"] == current_week_str].copy() if not df.empty else pd.DataFrame(columns=COLS)
 
 
-# ── Person sections ───────────────────────────────────────────────────────────
-for person in TEAM:   # Vesna, Craig, Damir
-    is_me = (person == active_user)
-    header_class = "person-header-mine" if is_me else "person-header"
-    st.markdown(f'<div class="{header_class}">{person}</div>', unsafe_allow_html=True)
+# ── Item renderer ─────────────────────────────────────────────────────────────
+def render_items(items_df, can_edit, add_key):
+    """Render a list of items with numbering, status checkboxes, edit and delete."""
+    for i, (_, row) in enumerate(items_df.iterrows(), 1):
+        item_id  = row["id"]
+        status   = row.get("status", "pending")
+        is_done  = (status == "done")
+        is_prog  = (status == "in_progress")
+        editing  = st.session_state.get(f"edit_{item_id}", False)
 
-    person_items = week_df[week_df["person"] == person] if not week_df.empty else pd.DataFrame(columns=COLS)
-
-    for _, row in person_items.iterrows():
-        item_id   = row["id"]
-        status    = row.get("status", "pending")
-        is_done   = (status == "done")
-        is_prog   = (status == "in_progress")
-
-        col_text, col_done, col_prog = st.columns([7, 1.2, 1.8])
-
-        with col_text:
-            st.markdown(f'<div style="padding-top:6px;">{row["item"]}</div>', unsafe_allow_html=True)
-
-        with col_done:
-            new_done = st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=not is_current_week)
-
-        with col_prog:
-            new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=not is_current_week)
-
-        # Resolve status from checkboxes
-        if is_current_week:
-            if new_done and not is_done:
-                new_status = "done"
-            elif new_prog and not is_prog and not new_done:
-                new_status = "in_progress"
-            elif not new_done and not new_prog and status in ("done", "in_progress"):
-                new_status = "pending"
-            else:
-                new_status = status
-
-            if new_status != status:
-                try:
-                    ws, err = get_sheet()
-                    if not err:
-                        update_row(ws, item_id, "status", new_status)
-                        invalidate_cache()
+        if editing and can_edit:
+            c_n, c_txt, c_done, c_prog, c_save, c_cancel = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.9])
+            with c_n:
+                st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:14px;">{i}.</div>', unsafe_allow_html=True)
+            with c_txt:
+                edited_text = st.text_input("edit", value=row["item"], key=f"edit_val_{item_id}", label_visibility="collapsed")
+            with c_done:
+                st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=True)
+            with c_prog:
+                st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=True)
+            with c_save:
+                if st.button("Save", key=f"save_{item_id}", use_container_width=True):
+                    try:
+                        ws, err = get_sheet()
+                        if not err and edited_text:
+                            update_row(ws, item_id, "item", edited_text)
+                            invalidate_cache()
+                        st.session_state[f"edit_{item_id}"] = False
                         st.rerun()
-                except Exception as e:
-                    st.error(str(e))
+                    except Exception as e:
+                        st.error(str(e))
+            with c_cancel:
+                if st.button("Cancel", key=f"cancel_{item_id}", use_container_width=True):
+                    st.session_state[f"edit_{item_id}"] = False
+                    st.rerun()
 
-    # Add item input — only for your own section, current week
-    if is_me and is_current_week:
-        n = st.session_state[f"input_n_{person}"]
+        else:
+            c_n, c_txt, c_done, c_prog, c_edit, c_del = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.6])
+            with c_n:
+                st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:14px;">{i}.</div>', unsafe_allow_html=True)
+            with c_txt:
+                st.markdown(f'<div style="padding-top:6px;">{row["item"]}</div>', unsafe_allow_html=True)
+            with c_done:
+                new_done = st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=not is_current_week)
+            with c_prog:
+                new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=not is_current_week)
+            with c_edit:
+                if can_edit and st.button("Edit", key=f"edit_btn_{item_id}", use_container_width=True):
+                    st.session_state[f"edit_{item_id}"] = True
+                    st.rerun()
+            with c_del:
+                if can_edit and st.button("×", key=f"del_{item_id}", use_container_width=True):
+                    try:
+                        ws, err = get_sheet()
+                        if not err:
+                            delete_row(ws, item_id)
+                            invalidate_cache()
+                            st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+
+            # Status update
+            if is_current_week:
+                if new_done and not is_done:
+                    new_status = "done"
+                elif new_prog and not is_prog and not new_done:
+                    new_status = "in_progress"
+                elif not new_done and not new_prog and status in ("done", "in_progress"):
+                    new_status = "pending"
+                else:
+                    new_status = status
+
+                if new_status != status:
+                    try:
+                        ws, err = get_sheet()
+                        if not err:
+                            update_row(ws, item_id, "status", new_status)
+                            invalidate_cache()
+                            st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+
+    # Add input
+    if can_edit and is_current_week:
+        n = st.session_state[f"input_n_{add_key}"]
         new_item = st.text_input(
             "add",
             placeholder="+ Add item…",
             label_visibility="collapsed",
-            key=f"new_{person}_{n}",
+            key=f"new_{add_key}_{n}",
         )
         if new_item:
             try:
@@ -333,9 +375,10 @@ for person in TEAM:   # Vesna, Craig, Damir
                 if err:
                     st.error(f"Sheet error: {err}")
                 else:
+                    person_label = add_key if add_key == RMG_PERSON else add_key
                     append_row(ws, {
                         "id": str(uuid.uuid4())[:8],
-                        "person": person,
+                        "person": person_label,
                         "week_start": current_week_str,
                         "type": "item",
                         "item": new_item,
@@ -344,76 +387,22 @@ for person in TEAM:   # Vesna, Craig, Damir
                         "updated_at": date.today().isoformat(),
                     })
                     invalidate_cache()
-                    st.session_state[f"input_n_{person}"] += 1
+                    st.session_state[f"input_n_{add_key}"] += 1
                     st.rerun()
             except Exception as e:
                 st.error(str(e))
 
-# ── rMG section (shared, anyone can add) ─────────────────────────────────────
+
+# ── Person sections ───────────────────────────────────────────────────────────
+for person in TEAM:   # Vesna, Craig, Damir
+    is_me = (person == active_user)
+    header_class = "person-header-mine" if is_me else "person-header"
+    st.markdown(f'<div class="{header_class}">{person}</div>', unsafe_allow_html=True)
+
+    person_items = week_df[week_df["person"] == person] if not week_df.empty else pd.DataFrame(columns=COLS)
+    render_items(person_items, can_edit=(is_me and is_current_week), add_key=person)
+
+# ── rMG section ───────────────────────────────────────────────────────────────
 st.markdown('<div class="person-header">rMG</div>', unsafe_allow_html=True)
-
 rmg_items = week_df[week_df["person"] == RMG_PERSON] if not week_df.empty else pd.DataFrame(columns=COLS)
-
-for _, row in rmg_items.iterrows():
-    item_id = row["id"]
-    status  = row.get("status", "pending")
-    is_done = (status == "done")
-    is_prog = (status == "in_progress")
-
-    col_text, col_done, col_prog = st.columns([7, 1.2, 1.8])
-    with col_text:
-        st.markdown(f'<div style="padding-top:6px;">{row["item"]}</div>', unsafe_allow_html=True)
-    with col_done:
-        new_done = st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=not is_current_week)
-    with col_prog:
-        new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=not is_current_week)
-
-    if is_current_week:
-        if new_done and not is_done:
-            new_status = "done"
-        elif new_prog and not is_prog and not new_done:
-            new_status = "in_progress"
-        elif not new_done and not new_prog and status in ("done", "in_progress"):
-            new_status = "pending"
-        else:
-            new_status = status
-
-        if new_status != status:
-            try:
-                ws, err = get_sheet()
-                if not err:
-                    update_row(ws, item_id, "status", new_status)
-                    invalidate_cache()
-                    st.rerun()
-            except Exception as e:
-                st.error(str(e))
-
-if is_current_week:
-    n_rmg = st.session_state["input_n_rMG"]
-    new_rmg = st.text_input(
-        "add_rmg",
-        placeholder="+ Add rMG item…",
-        label_visibility="collapsed",
-        key=f"new_rMG_{n_rmg}",
-    )
-    if new_rmg:
-        try:
-            ws, err = get_sheet()
-            if err:
-                st.error(f"Sheet error: {err}")
-            else:
-                append_row(ws, {
-                    "id": str(uuid.uuid4())[:8],
-                    "person": RMG_PERSON,
-                    "week_start": current_week_str,
-                    "type": "item",
-                    "item": new_rmg,
-                    "status": "pending",
-                    "created_at": date.today().isoformat(),
-                    "updated_at": date.today().isoformat(),
-                })
-                invalidate_cache()
-                st.session_state["input_n_rMG"] += 1
-                st.rerun()
-        except Exception as e:
-            st.error(str(e))
+render_items(rmg_items, can_edit=is_current_week, add_key=RMG_PERSON)
