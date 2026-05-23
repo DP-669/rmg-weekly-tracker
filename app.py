@@ -134,11 +134,28 @@ html, body, [class*="css"] {
 /* Checkboxes */
 .stCheckbox { margin-bottom: 0 !important; }
 
-/* Done checkboxes — always the 2nd column in item rows — green */
-[data-testid="stHorizontalBlock"] [data-testid="column"]:nth-child(2) input[type="checkbox"] {
+/* Done checkboxes — 3rd column (after number + text) — green */
+[data-testid="stHorizontalBlock"] [data-testid="column"]:nth-child(3) input[type="checkbox"] {
     accent-color: #34C759 !important;
     width: 16px !important;
     height: 16px !important;
+}
+
+/* Expander styling */
+[data-testid="stExpander"] {
+    border: 1px solid #E5E5EA !important;
+    border-radius: 10px !important;
+    margin-bottom: 8px !important;
+    background: white !important;
+}
+[data-testid="stExpander"] summary {
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    color: #1C1C1E !important;
+    padding: 10px 14px !important;
+}
+.my-expander [data-testid="stExpander"] summary {
+    color: #007AFF !important;
 }
 
 /* Responsive */
@@ -439,13 +456,15 @@ def render_items(items_df, can_edit, add_key):
 # ── Person sections ───────────────────────────────────────────────────────────
 for person in TEAM:   # Vesna, Craig, Damir
     is_me = (person == active_user)
-    header_class = "person-header-mine" if is_me else "person-header"
-    st.markdown(f'<div class="{header_class}">{person}</div>', unsafe_allow_html=True)
-
-    person_items = week_df[week_df["person"] == person] if not week_df.empty else pd.DataFrame(columns=COLS)
-    render_items(person_items, can_edit=(is_me and is_current_week), add_key=person)
+    if is_me:
+        st.markdown('<div class="my-expander">', unsafe_allow_html=True)
+    with st.expander(person, expanded=True):
+        person_items = week_df[week_df["person"] == person] if not week_df.empty else pd.DataFrame(columns=COLS)
+        render_items(person_items, can_edit=(is_me and is_current_week), add_key=person)
+    if is_me:
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # ── rMG section ───────────────────────────────────────────────────────────────
-st.markdown('<div class="person-header">rMG</div>', unsafe_allow_html=True)
-rmg_items = week_df[week_df["person"] == RMG_PERSON] if not week_df.empty else pd.DataFrame(columns=COLS)
-render_items(rmg_items, can_edit=is_current_week, add_key=RMG_PERSON)
+with st.expander("rMG", expanded=True):
+    rmg_items = week_df[week_df["person"] == RMG_PERSON] if not week_df.empty else pd.DataFrame(columns=COLS)
+    render_items(rmg_items, can_edit=is_current_week, add_key=RMG_PERSON)
