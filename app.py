@@ -410,6 +410,7 @@ for person, col in columns_map.items():
                             "updated_at": date.today().isoformat(),
                         })
                         invalidate_cache()
+                        st.session_state[f"new_plan_{person}"] = ""
                         st.rerun()
                 except Exception as e:
                     st.error(str(e))
@@ -447,6 +448,7 @@ for person, col in columns_map.items():
                             "updated_at": date.today().isoformat(),
                         })
                         invalidate_cache()
+                        st.session_state[f"new_accom_{person}"] = ""
                         st.rerun()
                 except Exception as e:
                     st.error(str(e))
