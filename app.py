@@ -214,14 +214,14 @@ def append_row(ws, row_dict: dict):
 
 
 def update_row(ws, row_id: str, field: str, value: str):
-    cell = ws.find(row_id, in_column=1)
+    cell = ws.find(str(row_id), in_column=1)
     if cell:
         ws.update_cell(cell.row, COLS.index(field) + 1, value)
         ws.update_cell(cell.row, COLS.index("updated_at") + 1, date.today().isoformat())
 
 
 def delete_row(ws, row_id: str):
-    cell = ws.find(row_id, in_column=1)
+    cell = ws.find(str(row_id), in_column=1)
     if cell:
         ws.delete_rows(cell.row)
 
