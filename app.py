@@ -293,9 +293,135 @@ for _p in TEAM + [RMG_PERSON]:
     if f"input_n_{_p}" not in st.session_state:
         st.session_state[f"input_n_{_p}"] = 0
 
+# ── Rollover and chat-add helpers ────────────────────────────────────────────
+def _do_rollover(current_week, current_week_str, force=False):
+    """Carry over un-done items from previous week to current. Idempotent."""
+    ws, err = get_sheet()
+    if err:
+        st.error(f"Sheet error: {err}")
+        return 0, 0
+    last_week_str = (current_week - timedelta(weeks=1)).isoformat()
+    invalidate_cache()
+    df_all, _ = load_data("rollover")
+    existing = set()
+    if not df_all.empty:
+        dest = df_all[df_all["week_start"] == current_week_str]
+        for _, r in dest.iterrows():
+            existing.add((r["person"], str(r["item"]).strip().lower()))
+    carried = 0
+    skipped = 0
+    src = df_all[df_all["week_start"] == last_week_str] if not df_all.empty else pd.DataFrame(columns=COLS)
+    for _, row in src.iterrows():
+        if row["status"] == "done":
+            continue
+        key = (row["person"], str(row["item"]).strip().lower())
+        if key in existing:
+            skipped += 1
+            continue
+        append_row(ws, {
+            "id": str(uuid.uuid4())[:8],
+            "person": row["person"],
+            "week_start": current_week_str,
+            "type": "item",
+            "item": row["item"],
+            "status": row["status"],
+            "created_at": date.today().isoformat(),
+            "updated_at": date.today().isoformat(),
+        })
+        existing.add(key)
+        carried += 1
+    invalidate_cache()
+    if force:
+        if carried == 0 and skipped == 0:
+            st.info("Nothing to carry over.")
+        else:
+            msg = f"Carried over {carried} item{'s' if carried != 1 else ''}."
+            if skipped > 0:
+                msg += f" Skipped {skipped} already present."
+            st.success(msg)
+    return carried, skipped
+
+
+def _auto_rollover_if_needed(current_week, current_week_str):
+    """Auto-carry on first load of a new week if current week is empty and last week has items."""
+    if get_monday(date.today()) != current_week:
+        return
+    flag = f"_auto_ro_{current_week_str}"
+    if st.session_state.get(flag, False):
+        return
+    df_check, _ = load_data("auto_check")
+    if df_check.empty:
+        st.session_state[flag] = True
+        return
+    if (df_check["week_start"] == current_week_str).any():
+        st.session_state[flag] = True
+        return
+    last_week_str = (current_week - timedelta(weeks=1)).isoformat()
+    if not (df_check["week_start"] == last_week_str).any():
+        st.session_state[flag] = True
+        return
+    try:
+        carried, _ = _do_rollover(current_week, current_week_str, force=False)
+        if carried > 0:
+            st.toast(f"Auto-carried {carried} items from last week.", icon="🔄")
+    except Exception:
+        pass
+    st.session_state[flag] = True
+
+
+def _handle_chat_add():
+    """If URL has ?add_to=X&item=Y&token=Z and token matches secret, append item to current week."""
+    qp = st.query_params
+    if not all(k in qp for k in ("add_to", "item", "token")):
+        return
+    try:
+        expected = st.secrets.get("CHAT_ADD_TOKEN", "")
+    except Exception:
+        expected = ""
+    if not expected or qp.get("token") != expected:
+        st.query_params.clear()
+        return
+    add_to = qp.get("add_to", "")
+    item_text = qp.get("item", "").strip()
+    if not item_text or add_to not in (TEAM + [RMG_PERSON]):
+        st.query_params.clear()
+        return
+    ws, err = get_sheet()
+    if err:
+        st.query_params.clear()
+        return
+    week_start = get_monday(date.today()).isoformat()
+    df_check, _ = load_data("chat_add")
+    week_existing = df_check[df_check["week_start"] == week_start] if not df_check.empty else pd.DataFrame(columns=COLS)
+    already = any(
+        (r["person"] == add_to and str(r["item"]).strip().lower() == item_text.lower())
+        for _, r in week_existing.iterrows()
+    )
+    if not already:
+        append_row(ws, {
+            "id": str(uuid.uuid4())[:8],
+            "person": add_to,
+            "week_start": week_start,
+            "type": "item",
+            "item": item_text,
+            "status": "pending",
+            "created_at": date.today().isoformat(),
+            "updated_at": date.today().isoformat(),
+        })
+        invalidate_cache()
+        st.toast(f"Added to {add_to}: {item_text}", icon="✅")
+    else:
+        st.toast("Already in this week — not added.", icon="ℹ️")
+    st.query_params.clear()
+
+
 current_week     = st.session_state["current_week"]
 current_week_str = current_week.isoformat()
 is_current_week  = (current_week == get_monday(date.today()))
+
+# Run pre-render handlers (URL-driven chat-add + auto-rollover)
+_handle_chat_add()
+_auto_rollover_if_needed(current_week, current_week_str)
 
 
 # ── TOP BAR ───────────────────────────────────────────────────────────────────
@@ -326,33 +452,16 @@ with c_week:
             st.rerun()
 
 with c_roll:
-    if st.button("Weekly Rollover", use_container_width=True):
+    rolling = st.session_state.get("rolling_over", False)
+    if st.button("Weekly Rollover", use_container_width=True, disabled=rolling):
+        st.session_state["rolling_over"] = True
         with st.spinner("Running rollover…"):
             try:
-                ws, err = get_sheet()
-                if err:
-                    st.error(f"Sheet error: {err}")
-                else:
-                    last_week_str = (current_week - timedelta(weeks=1)).isoformat()
-                    df_all, _ = load_data("rollover")
-                    carried = 0
-                    for _, row in df_all[df_all["week_start"] == last_week_str].iterrows():
-                        if row["status"] != "done":
-                            append_row(ws, {
-                                "id": str(uuid.uuid4())[:8],
-                                "person": row["person"],
-                                "week_start": current_week_str,
-                                "type": "item",
-                                "item": row["item"],
-                                "status": row["status"],
-                                "created_at": date.today().isoformat(),
-                                "updated_at": date.today().isoformat(),
-                            })
-                            carried += 1
-                    invalidate_cache()
-                    st.success(f"Carried over {carried} items.")
+                _do_rollover(current_week, current_week_str, force=True)
             except Exception as e:
                 st.error(str(e))
+            finally:
+                st.session_state["rolling_over"] = False
 
 if not is_current_week:
     st.caption("Viewing a past week — read only.")
@@ -503,20 +612,27 @@ def render_items(items_df, can_edit, add_key):
                 if err:
                     st.error(f"Sheet error: {err}")
                 else:
-                    person_label = add_key if add_key == RMG_PERSON else add_key
-                    append_row(ws, {
-                        "id": str(uuid.uuid4())[:8],
-                        "person": person_label,
-                        "week_start": current_week_str,
-                        "type": "item",
-                        "item": new_item,
-                        "status": "pending",
-                        "created_at": date.today().isoformat(),
-                        "updated_at": date.today().isoformat(),
-                    })
-                    invalidate_cache()
-                    st.session_state[f"input_n_{add_key}"] += 1
-                    st.rerun()
+                    person_label = add_key
+                    already = any(
+                        str(r["item"]).strip().lower() == new_item.strip().lower()
+                        for _, r in items_df.iterrows()
+                    )
+                    if already:
+                        st.warning("Already on the list.")
+                    else:
+                        append_row(ws, {
+                            "id": str(uuid.uuid4())[:8],
+                            "person": person_label,
+                            "week_start": current_week_str,
+                            "type": "item",
+                            "item": new_item,
+                            "status": "pending",
+                            "created_at": date.today().isoformat(),
+                            "updated_at": date.today().isoformat(),
+                        })
+                        invalidate_cache()
+                        st.session_state[f"input_n_{add_key}"] += 1
+                        st.rerun()
             except Exception as e:
                 st.error(str(e))
 
