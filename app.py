@@ -493,35 +493,38 @@ def render_items(items_df, can_edit, add_key):
 
     for i, (_, row) in enumerate(items_df.iterrows(), 1):
         item_id  = row["id"]
+        # Widget keys must be unique even if two sheet rows share the same id.
+        # Section name + position guarantees that; item_id kept for readability.
+        rk       = f"{add_key}_{i}_{item_id}"
         status   = row.get("status", "pending")
         is_done  = (status == "done")
         is_prog  = (status == "in_progress")
-        editing  = st.session_state.get(f"edit_{item_id}", False)
+        editing  = st.session_state.get(f"edit_{rk}", False)
 
         if editing and can_edit:
             c_n, c_txt, c_done, c_prog, c_save, c_cancel = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.9])
             with c_n:
                 st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:14px;">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
-                edited_text = st.text_input("edit", value=row["item"], key=f"edit_val_{item_id}", label_visibility="collapsed")
+                edited_text = st.text_input("edit", value=row["item"], key=f"edit_val_{rk}", label_visibility="collapsed")
             with c_done:
-                st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=True)
+                st.checkbox("Done", value=is_done, key=f"done_{rk}", disabled=True)
             with c_prog:
-                st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=True)
+                st.checkbox("In progress", value=is_prog, key=f"prog_{rk}", disabled=True)
             with c_save:
-                if st.button("Save", key=f"save_{item_id}", use_container_width=True):
+                if st.button("Save", key=f"save_{rk}", use_container_width=True):
                     try:
                         ws, err = get_sheet()
                         if not err and edited_text:
                             update_row(ws, item_id, "item", edited_text)
                             invalidate_cache()
-                        st.session_state[f"edit_{item_id}"] = False
+                        st.session_state[f"edit_{rk}"] = False
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))
             with c_cancel:
-                if st.button("Cancel", key=f"cancel_{item_id}", use_container_width=True):
-                    st.session_state[f"edit_{item_id}"] = False
+                if st.button("Cancel", key=f"cancel_{rk}", use_container_width=True):
+                    st.session_state[f"edit_{rk}"] = False
                     st.rerun()
 
         else:
@@ -548,23 +551,23 @@ def render_items(items_df, can_edit, add_key):
             with c_txt:
                 st.markdown(f'<div style="{txt_style}">{linkify(row["item"])}</div>', unsafe_allow_html=True)
             with c_done:
-                new_done = st.checkbox("Done", value=is_done, key=f"done_{item_id}", disabled=not is_current_week)
+                new_done = st.checkbox("Done", value=is_done, key=f"done_{rk}", disabled=not is_current_week)
             with c_prog:
-                new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{item_id}", disabled=not is_current_week)
+                new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{rk}", disabled=not is_current_week)
 
             if row_class:
                 st.markdown('</div>', unsafe_allow_html=True)
             with c_edit:
                 if can_edit:
                     st.markdown('<div class="btn-edit">', unsafe_allow_html=True)
-                    if st.button("●", key=f"edit_btn_{item_id}", use_container_width=True):
-                        st.session_state[f"edit_{item_id}"] = True
+                    if st.button("●", key=f"edit_btn_{rk}", use_container_width=True):
+                        st.session_state[f"edit_{rk}"] = True
                         st.rerun()
                     st.markdown('</div>', unsafe_allow_html=True)
             with c_del:
                 if can_edit:
                     st.markdown('<div class="btn-del">', unsafe_allow_html=True)
-                if can_edit and st.button("×", key=f"del_{item_id}", use_container_width=True):
+                if can_edit and st.button("×", key=f"del_{rk}", use_container_width=True):
                     try:
                         ws, err = get_sheet()
                         if not err:
