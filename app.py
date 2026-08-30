@@ -489,14 +489,19 @@ def render_items(items_df, can_edit, add_key):
         _order = {"in_progress": 0, "pending": 1, "done": 2}
         items_df = items_df.copy()
         items_df["_s"] = items_df["status"].map(lambda s: _order.get(s, 1))
-        items_df = items_df.sort_values("_s").drop(columns=["_s"])
+        # Stable sort: items with the same status keep their sheet order instead of
+        # being reshuffled by quicksort on every rerun.
+        items_df = items_df.sort_values("_s", kind="stable").drop(columns=["_s"])
 
     for i, (_, row) in enumerate(items_df.iterrows(), 1):
         item_id  = row["id"]
-        # Widget keys must be unique even if two sheet rows share the same id.
-        # Section name + position guarantees that; item_id kept for readability.
-        rk       = f"{add_key}_{i}_{item_id}"
         status   = row.get("status", "pending")
+        # Widget keys must be unique even if two sheet rows share the same id —
+        # section name + position guarantees that; item_id kept for readability.
+        # The status is part of the key too: Streamlit ignores the `value=` argument
+        # once a key exists in session_state, so a key that outlives a status change
+        # would keep showing the pre-change checkbox state.
+        rk       = f"{add_key}_{i}_{item_id}_{status}"
         is_done  = (status == "done")
         is_prog  = (status == "in_progress")
         editing  = st.session_state.get(f"edit_{rk}", False)
@@ -519,12 +524,14 @@ def render_items(items_df, can_edit, add_key):
                             update_row(ws, item_id, "item", edited_text)
                             invalidate_cache()
                         st.session_state[f"edit_{rk}"] = False
+                        st.session_state.pop(f"edit_val_{rk}", None)
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))
             with c_cancel:
                 if st.button("Cancel", key=f"cancel_{rk}", use_container_width=True):
                     st.session_state[f"edit_{rk}"] = False
+                    st.session_state.pop(f"edit_val_{rk}", None)
                     st.rerun()
 
         else:
@@ -581,12 +588,12 @@ def render_items(items_df, can_edit, add_key):
 
             # Status update
             if is_current_week:
-                if new_done and not is_done:
-                    new_status = "done"
-                elif new_prog and not is_prog and not new_done:
-                    new_status = "in_progress"
-                elif not new_done and not new_prog and status in ("done", "in_progress"):
-                    new_status = "pending"
+                # Exactly one checkbox can change per rerun, so resolve on the toggle
+                # rather than on the combination of both boxes.
+                if new_done != is_done:
+                    new_status = "done" if new_done else "pending"
+                elif new_prog != is_prog:
+                    new_status = "in_progress" if new_prog else "pending"
                 else:
                     new_status = status
 
