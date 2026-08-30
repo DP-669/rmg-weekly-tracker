@@ -1,4 +1,6 @@
-streamlit>=1.32.0
+# >=1.39: widget keys become st-key-<key> DOM classes, which the
+# stylesheet uses to target individual controls (verified on 1.39 and 1.62)
+streamlit>=1.39.0
 gspread>=6.0.0
 google-auth>=2.0.0
 pandas>=2.0.0

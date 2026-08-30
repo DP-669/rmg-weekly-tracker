@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
@@ -6,10 +7,16 @@ from datetime import date, timedelta
 import uuid
 import re
 import time
+import html
 
 
 def linkify(text: str) -> str:
-    """Convert [label](url) and bare URLs to clickable HTML. Safe against double-conversion."""
+    """Convert [label](url) and bare URLs to clickable HTML. Safe against double-conversion.
+
+    The result is written out with unsafe_allow_html, so the text is escaped first
+    — otherwise anything typed into an item would be rendered as live markup.
+    """
+    text = html.escape(str(text))
     # Convert [label](url) markdown links first
     text = re.sub(
         r'\[([^\]]+)\]\((https?://[^\)\s]+)\)',
@@ -36,13 +43,27 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
 
+:root {
+    --fs-scale: 1;
+    /* Widget chrome — checkbox labels, buttons, the week label — scales at half
+       rate. Row layout is fixed-ratio columns, and at full scale "In progress"
+       breaks to one letter per line inside its column. Content (item text,
+       names, numbering) still takes the full scale, which is what is actually
+       being read. */
+    --fs-chrome: calc(1 + (var(--fs-scale) - 1) * 0.5);
+}
+
+/* Streamlit sizes its own widget text in rem, so the root size drives every
+   label this stylesheet never touches. */
+html { font-size: calc(16px * var(--fs-chrome)) !important; }
+
 html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif !important;
     background-color: #F2F2F7 !important;
-    font-size: 15px !important;
 }
+body { font-size: calc(15px * var(--fs-scale)) !important; }
 #MainMenu, header, footer { visibility: hidden; }
-.block-container { padding-top: 1rem; padding-bottom: 2rem; max-width: 860px; }
+.block-container { padding-top: 1rem; padding-bottom: 2rem; max-width: calc(860px * var(--fs-scale)); }
 
 /* Top bar */
 .top-bar {
@@ -59,7 +80,7 @@ html, body, [class*="css"] {
 
 /* Person section */
 .person-header {
-    font-size: 17px;
+    font-size: calc(17px * var(--fs-scale));
     font-weight: 600;
     color: #1C1C1E;
     padding: 6px 0 2px 0;
@@ -68,7 +89,7 @@ html, body, [class*="css"] {
     margin-top: 16px;
 }
 .person-header-mine {
-    font-size: 17px;
+    font-size: calc(17px * var(--fs-scale));
     font-weight: 600;
     color: #007AFF;
     padding: 6px 0 2px 0;
@@ -86,7 +107,7 @@ html, body, [class*="css"] {
     border: 1px solid #E5E5EA;
     padding: 8px 12px;
     margin-bottom: 4px;
-    font-size: 15px;
+    font-size: calc(15px * var(--fs-scale));
 }
 .item-done {
     text-decoration: line-through;
@@ -96,7 +117,7 @@ html, body, [class*="css"] {
 /* Default buttons */
 .stButton > button {
     border-radius: 7px !important;
-    font-size: 14px !important;
+    font-size: calc(14px * var(--fs-chrome)) !important;
     padding: 4px 12px !important;
     height: auto !important;
     border: 1px solid #E5E5EA !important;
@@ -108,8 +129,11 @@ html, body, [class*="css"] {
     color: #007AFF !important;
 }
 
-/* Edit button — small yellow circle */
-.btn-edit .stButton > button {
+/* Edit button — small yellow circle.
+   Targeted by Streamlit's st-key-<key> container class: a wrapper <div> emitted
+   through st.markdown renders in its own container and never encloses the
+   widget that follows it, so the old .btn-edit descendant selector never matched. */
+[class*="st-key-edit_btn_"] button {
     width: 24px !important;
     height: 24px !important;
     min-height: 24px !important;
@@ -120,13 +144,13 @@ html, body, [class*="css"] {
     color: transparent !important;
     font-size: 0 !important;
 }
-.btn-edit .stButton > button:hover {
+[class*="st-key-edit_btn_"] button:hover {
     background: #FFC200 !important;
     border: none !important;
 }
 
 /* Delete button — small grey circle, red on hover */
-.btn-del .stButton > button {
+[class*="st-key-del_"] button {
     width: 24px !important;
     height: 24px !important;
     min-height: 24px !important;
@@ -135,10 +159,10 @@ html, body, [class*="css"] {
     background: #E5E5EA !important;
     border: none !important;
     color: #8E8E93 !important;
-    font-size: 13px !important;
+    font-size: calc(13px * var(--fs-scale)) !important;
     line-height: 1 !important;
 }
-.btn-del .stButton > button:hover {
+[class*="st-key-del_"] button:hover {
     background: #FF3B30 !important;
     border: none !important;
     color: white !important;
@@ -150,7 +174,7 @@ html, body, [class*="css"] {
 
 /* Text input */
 .stTextInput > div > div > input {
-    font-size: 14px !important;
+    font-size: calc(14px * var(--fs-chrome)) !important;
     border-radius: 8px !important;
     background: #F9F9FB !important;
 }
@@ -158,14 +182,20 @@ html, body, [class*="css"] {
 /* Checkboxes */
 .stCheckbox { margin-bottom: 0 !important; }
 
+/* A wrapped "In progress" would break one letter per line in its column. */
+[data-testid="stCheckbox"] label { white-space: nowrap; }
+
 /* Checkboxes base size */
 input[type="checkbox"] { width: 16px !important; height: 16px !important; }
 
-/* In-progress row — subtle left accent */
-.item-inprog {
-    border-left: 3px solid #FF9500 !important;
-    padding-left: 6px !important;
-    border-radius: 0 6px 6px 0 !important;
+/* Green "Done" ticks. Two earlier attempts missed for different reasons: a
+   <script> inside st.markdown (Streamlit inserts it but never runs it), and
+   accent-color (Streamlit hides the native input and paints its own box beside
+   it, so the property has nothing to colour). The checked box is that sibling
+   <div>. "In progress" deliberately keeps the theme colour. */
+[class*="st-key-done_"] label:has(input:checked) > span + div {
+    background-color: #34C759 !important;
+    border-color: #34C759 !important;
 }
 
 /* Expander styling */
@@ -176,7 +206,7 @@ input[type="checkbox"] { width: 16px !important; height: 16px !important; }
     background: white !important;
 }
 [data-testid="stExpander"] summary {
-    font-size: 16px !important;
+    font-size: calc(16px * var(--fs-scale)) !important;
     font-weight: 600 !important;
     color: #1C1C1E !important;
     padding: 10px 14px !important;
@@ -189,23 +219,140 @@ input[type="checkbox"] { width: 16px !important; height: 16px !important; }
 @media (max-width: 768px) {
     .block-container { padding-left: 0.5rem; padding-right: 0.5rem; }
 }
+
+/* ── Text-size control ────────────────────────────────────────────────────
+   Saved to the Home Screen, this runs as a standalone web app with no browser
+   chrome, so there is no Safari text-size control to reach for. This is that
+   control, living in the page. Its own sizes are deliberately fixed px and not
+   scaled, so it stays a constant, findable size at every zoom level. */
+#rmg-fs-bar {
+    position: fixed;
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #E5E5EA;
+    border-radius: 999px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.10);
+    -webkit-backdrop-filter: saturate(180%) blur(8px);
+    backdrop-filter: saturate(180%) blur(8px);
+}
+#rmg-fs-bar button {
+    width: 44px;              /* Apple's minimum comfortable touch target */
+    height: 44px;
+    min-width: 44px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: #007AFF;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+#rmg-fs-bar button:active { background: #E5E5EA; }
+#rmg-fs-bar button:disabled { color: #C7C7CC; }
+#rmg-fs-value {
+    min-width: 46px;
+    text-align: center;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    color: #8E8E93;
+    font-variant-numeric: tabular-nums;
+}
+@media print { #rmg-fs-bar { display: none; } }
+
+/* The control ships inside a components iframe (the only place Streamlit will
+   actually run a script). Collapse its slot rather than hiding it, so the
+   iframe still loads and executes. */
+[class*="st-key-fs_control"] {
+    height: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+}
 </style>
+""", unsafe_allow_html=True)
+
+# ── Text size ─────────────────────────────────────────────────────────────────
+# Rendered right after the stylesheet so the control is present on every screen,
+# including the error page that st.stop()s before any data is drawn.
+#
+# This is deliberately pure client-side. A Streamlit widget would round-trip to
+# the server and rerun the page on every tap, and its value would reset whenever
+# iPadOS evicted the session — a Home Screen app relaunches from a fixed URL, so
+# there is no query string to carry state either. localStorage is scoped to the
+# installed web app and survives relaunch, so the preference sticks.
+_FS_CONTROL = """
 <script>
-(function() {
-    function greenDone() {
-        document.querySelectorAll('[data-testid="stCheckbox"]').forEach(function(cb) {
-            var p = cb.querySelector('p');
-            if (p && p.textContent.trim() === 'Done') {
-                var inp = cb.querySelector('input[type="checkbox"]');
-                if (inp) inp.style.accentColor = '#34C759';
-            }
-        });
+(function () {
+    var W = window.parent, D = W.document;
+    var KEY = 'rmg-font-scale';
+    var STEPS = [0.85, 1, 1.15, 1.3, 1.5, 1.7];
+
+    function read() {
+        try {
+            var v = parseFloat(W.localStorage.getItem(KEY));
+            return STEPS.indexOf(v) >= 0 ? v : 1;
+        } catch (e) { return 1; }   // private browsing / storage blocked
     }
-    greenDone();
-    new MutationObserver(greenDone).observe(document.body, { childList: true, subtree: true });
+    function save(v) { try { W.localStorage.setItem(KEY, String(v)); } catch (e) {} }
+
+    var scale = read();
+
+    function apply() {
+        D.documentElement.style.setProperty('--fs-scale', String(scale));
+        var i = STEPS.indexOf(scale);
+        var out = D.getElementById('rmg-fs-value');
+        var minus = D.getElementById('rmg-fs-minus');
+        var plus = D.getElementById('rmg-fs-plus');
+        if (out) out.textContent = Math.round(scale * 100) + '%';
+        if (minus) minus.disabled = (i <= 0);
+        if (plus) plus.disabled = (i >= STEPS.length - 1);
+    }
+
+    function step(dir) {
+        var i = STEPS.indexOf(scale);
+        if (i < 0) i = STEPS.indexOf(1);
+        i = Math.max(0, Math.min(STEPS.length - 1, i + dir));
+        scale = STEPS[i];
+        save(scale);
+        apply();
+    }
+
+    function build() {
+        if (D.getElementById('rmg-fs-bar')) { apply(); return; }
+        var bar = D.createElement('div');
+        bar.id = 'rmg-fs-bar';
+        bar.setAttribute('role', 'group');
+        bar.setAttribute('aria-label', 'Text size');
+        bar.innerHTML =
+            '<button id="rmg-fs-minus" type="button" aria-label="Smaller text">A\u2212</button>' +
+            '<span id="rmg-fs-value" aria-live="polite">100%</span>' +
+            '<button id="rmg-fs-plus" type="button" aria-label="Larger text">A+</button>';
+        D.body.appendChild(bar);
+        D.getElementById('rmg-fs-minus').addEventListener('click', function () { step(-1); });
+        D.getElementById('rmg-fs-plus').addEventListener('click', function () { step(1); });
+        apply();
+    }
+
+    // Appending to <body> puts the bar outside Streamlit's React root, so reruns
+    // leave it alone; the observer only matters if the body is ever replaced.
+    build();
+    new W.MutationObserver(build).observe(D.body, { childList: true });
 })();
 </script>
-""", unsafe_allow_html=True)
+"""
+
+with st.container(key="fs_control"):
+    components.html(_FS_CONTROL, height=0)
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 TEAM        = ["Vesna", "Craig", "Damir"]
@@ -490,7 +637,7 @@ with c_week:
             invalidate_cache()
             st.rerun()
     with wc2:
-        st.markdown(f"<div style='text-align:center;font-size:14px;padding-top:6px;'>{format_week(current_week)}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:center;font-size:calc(14px * var(--fs-chrome));padding-top:6px;'>{format_week(current_week)}</div>", unsafe_allow_html=True)
     with wc3:
         if st.button("→"):
             st.session_state["current_week"] += timedelta(weeks=1)
@@ -564,7 +711,7 @@ def render_items(items_df, can_edit, add_key):
         if editing and can_edit:
             c_n, c_txt, c_done, c_prog, c_save, c_cancel = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.9])
             with c_n:
-                st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:14px;">{i}.</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
                 edited_text = st.text_input("edit", value=row["item"], key=f"edit_val_{rk}", label_visibility="collapsed")
             with c_done:
@@ -590,26 +737,19 @@ def render_items(items_df, can_edit, add_key):
                     st.rerun()
 
         else:
-            # Status-based row styling
-            if is_prog:
-                row_class = "item-inprog"
-            else:
-                row_class = ""
-
-            # Text style by status
+            # Text style by status. The in-progress accent sits on the text cell
+            # itself: the old .item-inprog wrapper was emitted as its own
+            # st.markdown element, so it never enclosed the columns below it.
+            txt_style = "padding-top:6px; font-size:calc(15px * var(--fs-scale));"
             if is_done:
-                txt_style = "padding-top:6px; color:#8E8E93;"
+                txt_style += " color:#8E8E93;"
             elif is_prog:
-                txt_style = "padding-top:6px; color:#1C1C1E; font-weight:500;"
-            else:
-                txt_style = "padding-top:6px;"
-
-            if row_class:
-                st.markdown(f'<div class="{row_class}">', unsafe_allow_html=True)
+                txt_style += (" color:#1C1C1E; font-weight:500;"
+                              " border-left:3px solid #FF9500; padding-left:8px;")
 
             c_n, c_txt, c_done, c_prog, c_edit, c_del = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.6])
             with c_n:
-                st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:14px;">{i}.</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
                 st.markdown(f'<div style="{txt_style}">{linkify(row["item"])}</div>', unsafe_allow_html=True)
             with c_done:
@@ -617,18 +757,11 @@ def render_items(items_df, can_edit, add_key):
             with c_prog:
                 new_prog = st.checkbox("In progress", value=is_prog, key=f"prog_{rk}", disabled=not is_current_week)
 
-            if row_class:
-                st.markdown('</div>', unsafe_allow_html=True)
             with c_edit:
-                if can_edit:
-                    st.markdown('<div class="btn-edit">', unsafe_allow_html=True)
-                    if st.button("●", key=f"edit_btn_{rk}", use_container_width=True):
-                        st.session_state[f"edit_{rk}"] = True
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
+                if can_edit and st.button("●", key=f"edit_btn_{rk}", use_container_width=True):
+                    st.session_state[f"edit_{rk}"] = True
+                    st.rerun()
             with c_del:
-                if can_edit:
-                    st.markdown('<div class="btn-del">', unsafe_allow_html=True)
                 if can_edit and st.button("×", key=f"del_{rk}", use_container_width=True):
                     try:
                         ws, err = get_sheet()
@@ -638,8 +771,6 @@ def render_items(items_df, can_edit, add_key):
                             st.rerun()
                     except Exception as e:
                         st.error(str(e))
-                if can_edit:
-                    st.markdown('</div>', unsafe_allow_html=True)
 
             # Status update
             if is_current_week:
