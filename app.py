@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import date, timedelta
 import uuid
 import re
+import time
 
 
 def linkify(text: str) -> str:
@@ -224,17 +225,50 @@ def format_week(monday: date) -> str:
 
 
 # ── Google Sheets ─────────────────────────────────────────────────────────────
+# Google hands back these codes when it is busy or rate-limiting, not when
+# anything is wrong with the request. They are worth retrying; nothing else is.
+_TRANSIENT_CODES = {429, 500, 502, 503, 504}
+
+
+def _is_transient(err) -> bool:
+    """True for a retryable Google API failure. Accepts an exception or its string."""
+    resp = getattr(err, "response", None)
+    code = getattr(resp, "status_code", None)
+    if code is None:
+        code = getattr(err, "code", None)
+    if code in _TRANSIENT_CODES:
+        return True
+    # gspread stringifies as: APIError: [503]: The service is currently unavailable.
+    m = re.search(r"\[(\d{3})\]", str(err))
+    return bool(m) and int(m.group(1)) in _TRANSIENT_CODES
+
+
+def _retry(fn, attempts: int = 4, base: float = 0.6):
+    """Call fn(), retrying transient Google API errors with exponential backoff."""
+    for n in range(attempts):
+        try:
+            return fn()
+        except Exception as e:
+            if not _is_transient(e) or n == attempts - 1:
+                raise
+            time.sleep(base * (2 ** n))
+
+
 @st.cache_resource
 def _get_worksheet():
     try:
         creds_info = dict(st.secrets["GOOGLE"])
         creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
         client = gspread.authorize(creds)
-        ws = client.open(SHEET_NAME).sheet1
-        existing = ws.row_values(1)
-        if existing != COLS:
-            ws.insert_row(COLS, 1)
-        return ws, None
+
+        def _open():
+            ws = client.open(SHEET_NAME).sheet1
+            existing = ws.row_values(1)
+            if existing != COLS:
+                ws.insert_row(COLS, 1)
+            return ws
+
+        return _retry(_open), None
     except KeyError:
         return None, "setup"
     except Exception as e:
@@ -242,7 +276,14 @@ def _get_worksheet():
 
 
 def get_sheet():
-    return _get_worksheet()
+    ws, err = _get_worksheet()
+    # _get_worksheet returns its error instead of raising, and @st.cache_resource
+    # has no TTL — so without this a single 503 during the handshake would be
+    # cached for the life of the server process and every later rerun would keep
+    # replaying it. Drop the cached failure so the next rerun genuinely retries.
+    if err and err != "setup":
+        _get_worksheet.clear()
+    return ws, err
 
 
 @st.cache_data(ttl=60)
@@ -251,7 +292,7 @@ def load_data(_cache_key: str):
         ws, err = get_sheet()
         if err:
             return pd.DataFrame(columns=COLS), err
-        rows = ws.get_all_records()
+        rows = _retry(ws.get_all_records)
         if not rows:
             return pd.DataFrame(columns=COLS), None
         df = pd.DataFrame(rows)
@@ -268,20 +309,21 @@ def invalidate_cache():
 
 
 def append_row(ws, row_dict: dict):
-    ws.append_row([row_dict.get(c, "") for c in COLS], value_input_option="USER_ENTERED")
+    values = [row_dict.get(c, "") for c in COLS]
+    _retry(lambda: ws.append_row(values, value_input_option="USER_ENTERED"))
 
 
 def update_row(ws, row_id: str, field: str, value: str):
-    cell = ws.find(str(row_id), in_column=1)
+    cell = _retry(lambda: ws.find(str(row_id), in_column=1))
     if cell:
-        ws.update_cell(cell.row, COLS.index(field) + 1, value)
-        ws.update_cell(cell.row, COLS.index("updated_at") + 1, date.today().isoformat())
+        _retry(lambda: ws.update_cell(cell.row, COLS.index(field) + 1, value))
+        _retry(lambda: ws.update_cell(cell.row, COLS.index("updated_at") + 1, date.today().isoformat()))
 
 
 def delete_row(ws, row_id: str):
-    cell = ws.find(str(row_id), in_column=1)
+    cell = _retry(lambda: ws.find(str(row_id), in_column=1))
     if cell:
-        ws.delete_rows(cell.row)
+        _retry(lambda: ws.delete_rows(cell.row))
 
 
 # ── Session state ─────────────────────────────────────────────────────────────
@@ -349,7 +391,11 @@ def _auto_rollover_if_needed(current_week, current_week_str):
     flag = f"_auto_ro_{current_week_str}"
     if st.session_state.get(flag, False):
         return
-    df_check, _ = load_data("auto_check")
+    df_check, check_err = load_data("auto_check")
+    if check_err:
+        # Sheet unreachable — leave the flag unset so this runs once it recovers,
+        # rather than recording a rollover that never happened.
+        return
     if df_check.empty:
         st.session_state[flag] = True
         return
@@ -475,7 +521,16 @@ if load_err == "setup":
     st.warning("Google Sheets not configured. Add secrets in Streamlit Cloud settings.")
     st.stop()
 elif load_err:
-    st.error(f"Could not load data: {load_err}")
+    # Never leave a failure sitting in the data cache for the rest of its TTL.
+    load_data.clear()
+    if _is_transient(load_err):
+        st.error("Google Sheets is temporarily unavailable. This is usually brief — retry in a moment.")
+        st.caption(str(load_err))
+    else:
+        st.error(f"Could not load data: {load_err}")
+    if st.button("Retry"):
+        _get_worksheet.clear()
+        st.rerun()
     st.stop()
 
 week_df = df[df["week_start"] == current_week_str].copy() if not df.empty else pd.DataFrame(columns=COLS)
