@@ -24,7 +24,7 @@ st.set_page_config(page_title="rMG Weekly", layout="wide", page_icon="📋")
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap');
 
 :root {
     --fs-scale: 1;
@@ -41,6 +41,18 @@ st.markdown("""
     --link-color: #0B5FCC;      /* 6.0:1 (was #007AFF at 4.0:1) */
     --line-height: 1.5;
     --tracking: 0;
+    --font-stack: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    /* Surfaces. Named so the dark palette is one override block, not a rewrite. */
+    --page-bg: #F2F2F7;
+    --surface: #FFFFFF;
+    --surface-2: #F9F9FB;
+    --border: #E5E5EA;
+    --accent: #007AFF;
+    --accent-orange: #FF9500;
+    --accent-green: #34C759;
+    --accent-yellow: #FFD60A;
+    --pill-bg: rgba(255, 255, 255, 0.96);
     /* Widget chrome — checkbox labels, buttons, the week label — scales at half
        rate. Row layout is fixed-ratio columns, and at full scale "In progress"
        breaks to one letter per line inside its column. Content (item text,
@@ -60,18 +72,50 @@ st.markdown("""
     --link-color: #0A4FA8;      /* 8.6:1 */
     --line-height: 1.65;
     --tracking: 0.01em;
+    /* Atkinson Hyperlegible was drawn by the Braille Institute specifically for
+       low vision: exaggerated letterform differences so b/d, p/q, I/l/1 and O/0
+       cannot be confused. It ships Regular and Bold only, hence 700 not 600. */
+    --font-stack: 'Atkinson Hyperlegible', 'DM Sans', -apple-system, sans-serif;
+    --item-weight: 700;
+    --muted-weight: 400;
+}
+
+/* ── Dark mode ────────────────────────────────────────────────────────────
+   Only colours change here; weight, line-height and typeface come from the
+   blocks above so the two switches compose instead of overriding each other. */
+:root[data-theme="dark"] {
+    --page-bg: #000000;
+    --surface: #1C1C1E;
+    --surface-2: #2C2C2E;
+    --border: #38383A;
+    --item-color: #F2F2F7;      /* 15.3:1 on #1C1C1E */
+    --muted-color: #A1A1A6;     /* 6.6:1 */
+    --link-color: #6CB4FF;      /* 8.0:1 */
+    --accent: #0A84FF;
+    --accent-orange: #FF9F0A;
+    --accent-green: #30D158;
+    --accent-yellow: #FFD60A;
+    --pill-bg: rgba(44, 44, 46, 0.96);
+}
+
+:root[data-theme="dark"][data-legible="1"] {
+    --item-color: #FFFFFF;      /* 16.7:1 */
+    --muted-color: #C7C7CC;     /* 11.0:1 */
+    --link-color: #8FC7FF;      /* 10.6:1 */
 }
 
 /* Links were #007AFF — 4.0:1, under the AA floor. */
 .block-container a { color: var(--link-color) !important; text-decoration: underline; }
 :root[data-legible="1"] .block-container a { font-weight: 600; }
 
-/* In high-legibility mode the widget labels darken too, not just item text. */
+/* In high-legibility mode the widget labels take the item colour too, not just
+   the item text. This must be the token, never a literal: hardcoding #000 here
+   turned the person names black-on-black once dark mode existed. */
 :root[data-legible="1"] [data-testid="stCheckbox"] label,
 :root[data-legible="1"] .stRadio label,
 :root[data-legible="1"] [data-testid="stExpander"] summary {
-    color: #000000 !important;
-    font-weight: 600 !important;
+    color: var(--item-color) !important;
+    font-weight: var(--item-weight) !important;
 }
 
 /* Streamlit sizes its own widget text in rem, so the root size drives every
@@ -79,21 +123,43 @@ st.markdown("""
 html { font-size: calc(16px * var(--fs-chrome)) !important; }
 
 html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif !important;
-    background-color: #F2F2F7 !important;
+    font-family: var(--font-stack) !important;
+    background-color: var(--page-bg) !important;
+}
+/* Streamlit sets font-family directly on stMarkdownContainer, which outranks
+   anything inherited from body — which is why the app's typeface never actually
+   reached the item text. Material ligature icons live outside these containers,
+   but are excluded explicitly so a Streamlit change cannot turn them into the
+   literal word "keyboard_arrow_down". */
+[data-testid="stMarkdownContainer"],
+[data-testid="stMarkdownContainer"] *:not([data-testid="stIconMaterial"]),
+[data-testid="stCheckbox"] label,
+.stRadio label,
+.stButton > button,
+.stTextInput input,
+[data-testid="stWidgetLabel"] {
+    font-family: var(--font-stack) !important;
+}
+[data-testid="stIconMaterial"] {
+    font-family: "Material Symbols Rounded", "Material Icons" !important;
+}
+
+/* Streamlit paints its own app shell; without this the page stays light. */
+[data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stHeader"] {
+    background-color: var(--page-bg) !important;
 }
 body { font-size: calc(15px * var(--fs-scale)) !important; }
 #MainMenu, header, footer { visibility: hidden; }
-.block-container { padding-top: 1rem; padding-bottom: 2rem; max-width: calc(860px * var(--fs-scale)); }
+.block-container { padding-top: 1rem; padding-bottom: 2rem; max-width: calc(1040px * var(--fs-scale)); }
 
 /* Top bar */
 .top-bar {
     display: flex;
     align-items: center;
     gap: 24px;
-    background: white;
+    background: var(--surface);
     border-radius: 10px;
-    border: 1px solid #E5E5EA;
+    border: 1px solid var(--border);
     padding: 10px 16px;
     margin-bottom: 18px;
     flex-wrap: wrap;
@@ -105,14 +171,14 @@ body { font-size: calc(15px * var(--fs-scale)) !important; }
     font-weight: 600;
     color: var(--item-color);
     padding: 6px 0 2px 0;
-    border-bottom: 2px solid #007AFF;
+    border-bottom: 2px solid var(--accent);
     margin-bottom: 8px;
     margin-top: 16px;
 }
 .person-header-mine {
     font-size: calc(17px * var(--fs-scale));
     font-weight: 600;
-    color: #007AFF;
+    color: var(--accent);
     padding: 6px 0 2px 0;
     border-bottom: 2px solid #007AFF;
     margin-bottom: 8px;
@@ -123,9 +189,9 @@ body { font-size: calc(15px * var(--fs-scale)) !important; }
 .item-row {
     display: flex;
     align-items: center;
-    background: white;
+    background: var(--surface);
     border-radius: 8px;
-    border: 1px solid #E5E5EA;
+    border: 1px solid var(--border);
     padding: 8px 12px;
     margin-bottom: 4px;
     font-size: calc(15px * var(--fs-scale));
@@ -141,13 +207,13 @@ body { font-size: calc(15px * var(--fs-scale)) !important; }
     font-size: calc(14px * var(--fs-chrome)) !important;
     padding: 4px 12px !important;
     height: auto !important;
-    border: 1px solid #E5E5EA !important;
-    background: white !important;
-    color: #3C3C43 !important;
+    border: 1px solid var(--border) !important;
+    background: var(--surface) !important;
+    color: var(--item-color) !important;
 }
 .stButton > button:hover {
-    border-color: #007AFF !important;
-    color: #007AFF !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
 }
 
 /* Edit button — small yellow circle.
@@ -160,7 +226,7 @@ body { font-size: calc(15px * var(--fs-scale)) !important; }
     min-height: 24px !important;
     padding: 0 !important;
     border-radius: 50% !important;
-    background: #FFD60A !important;
+    background: var(--accent-yellow) !important;
     border: none !important;
     color: transparent !important;
     font-size: 0 !important;
@@ -177,9 +243,9 @@ body { font-size: calc(15px * var(--fs-scale)) !important; }
     min-height: 24px !important;
     padding: 0 !important;
     border-radius: 50% !important;
-    background: #E5E5EA !important;
+    background: var(--border) !important;
     border: none !important;
-    color: #8E8E93 !important;
+    color: var(--muted-color) !important;
     font-size: calc(13px * var(--fs-scale)) !important;
     line-height: 1 !important;
 }
@@ -197,7 +263,9 @@ body { font-size: calc(15px * var(--fs-scale)) !important; }
 .stTextInput > div > div > input {
     font-size: calc(14px * var(--fs-chrome)) !important;
     border-radius: 8px !important;
-    background: #F9F9FB !important;
+    background: var(--surface-2) !important;
+    color: var(--item-color) !important;
+    border: 1px solid var(--border) !important;
 }
 
 /* Checkboxes */
@@ -215,26 +283,57 @@ input[type="checkbox"] { width: 16px !important; height: 16px !important; }
    it, so the property has nothing to colour). The checked box is that sibling
    <div>. "In progress" deliberately keeps the theme colour. */
 [class*="st-key-done_"] label:has(input:checked) > span + div {
-    background-color: #34C759 !important;
-    border-color: #34C759 !important;
+    background-color: var(--accent-green) !important;
+    border-color: var(--accent-green) !important;
 }
 
 /* Expander styling */
 [data-testid="stExpander"] {
-    border: 1px solid #E5E5EA !important;
+    border: 1px solid var(--border) !important;
     border-radius: 10px !important;
     margin-bottom: 8px !important;
-    background: white !important;
+    background: var(--surface) !important;
 }
+[data-testid="stExpander"] details,
+[data-testid="stExpander"] summary { background: var(--surface) !important; }
 [data-testid="stExpander"] summary {
     font-size: calc(16px * var(--fs-scale)) !important;
     font-weight: 600 !important;
-    color: #1C1C1E !important;
+    color: var(--item-color) !important;
     padding: 10px 14px !important;
 }
 .my-expander [data-testid="stExpander"] summary {
-    color: #007AFF !important;
+    color: var(--accent) !important;
 }
+
+/* Widget labels (checkboxes, radio, the "You are:" caption) follow the theme. */
+[data-testid="stCheckbox"] label, .stRadio label, .stRadio > label,
+[data-testid="stWidgetLabel"], [data-testid="stCaptionContainer"] {
+    color: var(--item-color) !important;
+}
+/* Unchecked checkbox: Streamlit paints a white box, invisible on a dark card.
+   Scoped to :not(:has(input:checked)) — without that this also repainted the
+   CHECKED boxes, wiping out the green Done tick and the In-progress colour. */
+:root[data-theme="dark"] [data-testid="stCheckbox"] label:not(:has(input:checked)) > span + div {
+    background-color: var(--surface-2) !important;
+    border-color: var(--muted-color) !important;
+}
+
+/* Text input: the visible fill and border belong to the wrapper div around the
+   <input>, not the input itself, so theming the input alone leaves a bright box
+   on a dark page. Matched by shape rather than by Streamlit's generated class,
+   which changes between releases. */
+:root[data-theme="dark"] .stTextInput div:has(> input),
+:root[data-theme="dark"] [data-baseweb="input"],
+:root[data-theme="dark"] [data-baseweb="base-input"] {
+    background-color: var(--surface-2) !important;
+    border-color: var(--border) !important;
+}
+:root[data-theme="dark"] .stTextInput input::placeholder {
+    color: var(--muted-color) !important;
+    opacity: 1;
+}
+:root[data-theme="dark"] hr { border-color: var(--border) !important; }
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -257,8 +356,8 @@ input[type="checkbox"] { width: 16px !important; height: 16px !important; }
     align-items: center;
     gap: 2px;
     padding: 4px;
-    background: rgba(255, 255, 255, 0.96);
-    border: 1px solid #E5E5EA;
+    background: var(--pill-bg);
+    border: 1px solid var(--border);
     border-radius: 999px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.10);
     -webkit-backdrop-filter: saturate(180%) blur(8px);
@@ -271,33 +370,35 @@ input[type="checkbox"] { width: 16px !important; height: 16px !important; }
     border: none;
     border-radius: 50%;
     background: transparent;
-    color: #007AFF;
-    font-family: 'DM Sans', sans-serif;
+    color: var(--accent);
+    font-family: var(--font-stack);
     font-size: 17px;
     font-weight: 600;
     line-height: 1;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
 }
-#rmg-fs-bar button:active { background: #E5E5EA; }
+#rmg-fs-bar button:active { background: var(--border); }
 #rmg-fs-bar button:disabled { color: #C7C7CC; }
 #rmg-fs-sep {
     width: 1px;
     height: 26px;
     margin: 0 2px;
-    background: #E5E5EA;
+    background: var(--border);
 }
 #rmg-fs-legible { font-size: 15px !important; }
-#rmg-fs-legible[aria-pressed="true"] {
-    background: #007AFF;
+#rmg-fs-legible[aria-pressed="true"],
+#rmg-fs-theme[aria-pressed="true"] {
+    background: var(--accent);
     color: #FFFFFF;
 }
+#rmg-fs-theme { font-size: 17px !important; }
 #rmg-fs-value {
     min-width: 46px;
     text-align: center;
-    font-family: 'DM Sans', sans-serif;
+    font-family: var(--font-stack);
     font-size: 13px;
-    color: #8E8E93;
+    color: var(--muted-color);
     font-variant-numeric: tabular-nums;
 }
 @media print { #rmg-fs-bar { display: none; } }
@@ -329,6 +430,7 @@ _FS_CONTROL = """
     var W = window.parent, D = W.document;
     var KEY = 'rmg-font-scale';
     var LEG_KEY = 'rmg-legible';
+    var THEME_KEY = 'rmg-theme';
     var STEPS = [0.85, 1, 1.15, 1.3, 1.5, 1.7];
 
     function read() {
@@ -346,8 +448,16 @@ _FS_CONTROL = """
         try { W.localStorage.setItem(LEG_KEY, on ? '1' : '0'); } catch (e) {}
     }
 
+    function readDark() {
+        try { return W.localStorage.getItem(THEME_KEY) === 'dark'; } catch (e) { return false; }
+    }
+    function saveDark(on) {
+        try { W.localStorage.setItem(THEME_KEY, on ? 'dark' : 'light'); } catch (e) {}
+    }
+
     var scale = read();
     var legible = readLegible();
+    var dark = readDark();
 
     function apply() {
         D.documentElement.style.setProperty('--fs-scale', String(scale));
@@ -355,6 +465,11 @@ _FS_CONTROL = """
             D.documentElement.setAttribute('data-legible', '1');
         } else {
             D.documentElement.removeAttribute('data-legible');
+        }
+        if (dark) {
+            D.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+            D.documentElement.removeAttribute('data-theme');
         }
         var i = STEPS.indexOf(scale);
         var out = D.getElementById('rmg-fs-value');
@@ -364,12 +479,23 @@ _FS_CONTROL = """
         if (minus) minus.disabled = (i <= 0);
         if (plus) plus.disabled = (i >= STEPS.length - 1);
         var leg = D.getElementById('rmg-fs-legible');
+        var thm = D.getElementById('rmg-fs-theme');
+        if (thm) {
+            thm.setAttribute('aria-pressed', dark ? 'true' : 'false');
+            thm.textContent = dark ? '\u2600' : '\u263E';
+        }
         if (leg) leg.setAttribute('aria-pressed', legible ? 'true' : 'false');
     }
 
     function toggleLegible() {
         legible = !legible;
         saveLegible(legible);
+        apply();
+    }
+
+    function toggleDark() {
+        dark = !dark;
+        saveDark(dark);
         apply();
     }
 
@@ -394,11 +520,14 @@ _FS_CONTROL = """
             '<button id="rmg-fs-plus" type="button" aria-label="Larger text">A+</button>' +
             '<span id="rmg-fs-sep"></span>' +
             '<button id="rmg-fs-legible" type="button" aria-pressed="false" ' +
-            'aria-label="High contrast text" title="Darker, heavier text">Aa</button>';
+            'aria-label="High contrast text" title="Darker, heavier text">Aa</button>' +
+            '<button id="rmg-fs-theme" type="button" aria-pressed="false" ' +
+            'aria-label="Dark mode" title="Dark mode">\u263E</button>';
         D.body.appendChild(bar);
         D.getElementById('rmg-fs-minus').addEventListener('click', function () { step(-1); });
         D.getElementById('rmg-fs-plus').addEventListener('click', function () { step(1); });
         D.getElementById('rmg-fs-legible').addEventListener('click', toggleLegible);
+        D.getElementById('rmg-fs-theme').addEventListener('click', toggleDark);
         apply();
     }
 
@@ -707,7 +836,7 @@ def render_items(items_df, can_edit, add_key):
         editing  = st.session_state.get(f"edit_{rk}", False)
 
         if editing and can_edit:
-            c_n, c_txt, c_done, c_prog, c_save, c_cancel = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.9])
+            c_n, c_txt, c_done, c_prog, c_save, c_cancel = st.columns([0.35, 5.9, 1.15, 1.8, 0.75, 0.85])
             with c_n:
                 st.markdown(f'<div style="padding-top:8px;color:var(--muted-color);font-weight:var(--muted-weight);font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
@@ -745,11 +874,11 @@ def render_items(items_df, can_edit, add_key):
                 txt_style += " color:var(--muted-color); font-weight:var(--muted-weight);"
             elif is_prog:
                 txt_style += (" color:var(--item-color); font-weight:var(--item-weight);"
-                              " border-left:3px solid #FF9500; padding-left:8px;")
+                              " border-left:3px solid var(--accent-orange); padding-left:8px;")
             else:
                 txt_style += " color:var(--item-color); font-weight:var(--item-weight);"
 
-            c_n, c_txt, c_done, c_prog, c_edit, c_del = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.6])
+            c_n, c_txt, c_done, c_prog, c_edit, c_del = st.columns([0.35, 5.9, 1.15, 1.8, 0.75, 0.55])
             with c_n:
                 st.markdown(f'<div style="padding-top:8px;color:var(--muted-color);font-weight:var(--muted-weight);font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
             with c_txt:

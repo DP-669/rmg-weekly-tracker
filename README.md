@@ -34,11 +34,20 @@ The choice is stored in `localStorage`, so it survives quitting and relaunching
 the installed web app. It is per-device, not per-user: it is not written to the
 sheet and does not follow you to another iPad or browser.
 
-Beside it, `Aa` toggles high-legibility mode: near-black text at heavier
+Beside it, `Aa` toggles high-legibility mode, and `☾` toggles dark mode. All
+three settings are independent and each persists in `localStorage`.
+
+High-legibility mode also swaps the typeface to **Atkinson Hyperlegible**, drawn
+by the Braille Institute for low vision: letterforms are exaggerated so b/d,
+p/q, I/l/1 and O/0 cannot be confused. The default look keeps DM Sans, so this
+is per-person — one of us can run Atkinson without changing it for everyone.
+
+`Aa` gives: near-black text at heavier
 weight, darker "done" rows and links, and more line spacing. It persists the
 same way and is independent of the size setting.
 
-Default contrast now clears WCAG AA everywhere; high-legibility clears AAA.
+Contrast clears WCAG AA in all four combinations of the two toggles, and AAA
+in every one of them except two AA values in plain light mode.
 Two values previously failed AA — "done" rows and row numbers at 3.3:1, and
 links at 4.0:1.
 
