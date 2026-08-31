@@ -28,12 +28,50 @@ st.markdown("""
 
 :root {
     --fs-scale: 1;
+
+    /* Legibility tokens. Defaults fix two real contrast failures: item text was
+       inheriting Streamlit's 400-weight default, and "done" rows plus the row
+       numbers sat at #8E8E93 — 3.3:1 on white, under the 4.5:1 AA floor for
+       body text. The [data-legible="1"] block below goes further for anyone who
+       wants it; the toggle sits in the text-size pill. */
+    --item-color: #1C1C1E;      /* 17.0:1 */
+    --item-weight: 500;
+    --muted-color: #636366;     /* 6.0:1 — secondary, but readable */
+    --muted-weight: 400;
+    --link-color: #0B5FCC;      /* 6.0:1 (was #007AFF at 4.0:1) */
+    --line-height: 1.5;
+    --tracking: 0;
     /* Widget chrome — checkbox labels, buttons, the week label — scales at half
        rate. Row layout is fixed-ratio columns, and at full scale "In progress"
        breaks to one letter per line inside its column. Content (item text,
        names, numbering) still takes the full scale, which is what is actually
        being read. */
     --fs-chrome: calc(1 + (var(--fs-scale) - 1) * 0.5);
+}
+
+/* High-legibility mode: maximum contrast, heavier strokes, more air between
+   lines. Kept as a switch rather than the default because it trades the app's
+   lighter look for readability, and that is a personal call. */
+:root[data-legible="1"] {
+    --item-color: #000000;      /* 21.0:1 */
+    --item-weight: 600;
+    --muted-color: #3A3A3C;     /* 11.4:1 */
+    --muted-weight: 500;
+    --link-color: #0A4FA8;      /* 8.6:1 */
+    --line-height: 1.65;
+    --tracking: 0.01em;
+}
+
+/* Links were #007AFF — 4.0:1, under the AA floor. */
+.block-container a { color: var(--link-color) !important; text-decoration: underline; }
+:root[data-legible="1"] .block-container a { font-weight: 600; }
+
+/* In high-legibility mode the widget labels darken too, not just item text. */
+:root[data-legible="1"] [data-testid="stCheckbox"] label,
+:root[data-legible="1"] .stRadio label,
+:root[data-legible="1"] [data-testid="stExpander"] summary {
+    color: #000000 !important;
+    font-weight: 600 !important;
 }
 
 /* Streamlit sizes its own widget text in rem, so the root size drives every
@@ -65,7 +103,7 @@ body { font-size: calc(15px * var(--fs-scale)) !important; }
 .person-header {
     font-size: calc(17px * var(--fs-scale));
     font-weight: 600;
-    color: #1C1C1E;
+    color: var(--item-color);
     padding: 6px 0 2px 0;
     border-bottom: 2px solid #007AFF;
     margin-bottom: 8px;
@@ -243,6 +281,17 @@ input[type="checkbox"] { width: 16px !important; height: 16px !important; }
 }
 #rmg-fs-bar button:active { background: #E5E5EA; }
 #rmg-fs-bar button:disabled { color: #C7C7CC; }
+#rmg-fs-sep {
+    width: 1px;
+    height: 26px;
+    margin: 0 2px;
+    background: #E5E5EA;
+}
+#rmg-fs-legible { font-size: 15px !important; }
+#rmg-fs-legible[aria-pressed="true"] {
+    background: #007AFF;
+    color: #FFFFFF;
+}
 #rmg-fs-value {
     min-width: 46px;
     text-align: center;
@@ -279,6 +328,7 @@ _FS_CONTROL = """
 (function () {
     var W = window.parent, D = W.document;
     var KEY = 'rmg-font-scale';
+    var LEG_KEY = 'rmg-legible';
     var STEPS = [0.85, 1, 1.15, 1.3, 1.5, 1.7];
 
     function read() {
@@ -289,10 +339,23 @@ _FS_CONTROL = """
     }
     function save(v) { try { W.localStorage.setItem(KEY, String(v)); } catch (e) {} }
 
+    function readLegible() {
+        try { return W.localStorage.getItem(LEG_KEY) === '1'; } catch (e) { return false; }
+    }
+    function saveLegible(on) {
+        try { W.localStorage.setItem(LEG_KEY, on ? '1' : '0'); } catch (e) {}
+    }
+
     var scale = read();
+    var legible = readLegible();
 
     function apply() {
         D.documentElement.style.setProperty('--fs-scale', String(scale));
+        if (legible) {
+            D.documentElement.setAttribute('data-legible', '1');
+        } else {
+            D.documentElement.removeAttribute('data-legible');
+        }
         var i = STEPS.indexOf(scale);
         var out = D.getElementById('rmg-fs-value');
         var minus = D.getElementById('rmg-fs-minus');
@@ -300,6 +363,14 @@ _FS_CONTROL = """
         if (out) out.textContent = Math.round(scale * 100) + '%';
         if (minus) minus.disabled = (i <= 0);
         if (plus) plus.disabled = (i >= STEPS.length - 1);
+        var leg = D.getElementById('rmg-fs-legible');
+        if (leg) leg.setAttribute('aria-pressed', legible ? 'true' : 'false');
+    }
+
+    function toggleLegible() {
+        legible = !legible;
+        saveLegible(legible);
+        apply();
     }
 
     function step(dir) {
@@ -320,10 +391,14 @@ _FS_CONTROL = """
         bar.innerHTML =
             '<button id="rmg-fs-minus" type="button" aria-label="Smaller text">A\u2212</button>' +
             '<span id="rmg-fs-value" aria-live="polite">100%</span>' +
-            '<button id="rmg-fs-plus" type="button" aria-label="Larger text">A+</button>';
+            '<button id="rmg-fs-plus" type="button" aria-label="Larger text">A+</button>' +
+            '<span id="rmg-fs-sep"></span>' +
+            '<button id="rmg-fs-legible" type="button" aria-pressed="false" ' +
+            'aria-label="High contrast text" title="Darker, heavier text">Aa</button>';
         D.body.appendChild(bar);
         D.getElementById('rmg-fs-minus').addEventListener('click', function () { step(-1); });
         D.getElementById('rmg-fs-plus').addEventListener('click', function () { step(1); });
+        D.getElementById('rmg-fs-legible').addEventListener('click', toggleLegible);
         apply();
     }
 
@@ -634,7 +709,7 @@ def render_items(items_df, can_edit, add_key):
         if editing and can_edit:
             c_n, c_txt, c_done, c_prog, c_save, c_cancel = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.9])
             with c_n:
-                st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="padding-top:8px;color:var(--muted-color);font-weight:var(--muted-weight);font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
                 edited_text = st.text_input("edit", value=row["item"], key=f"edit_val_{rk}", label_visibility="collapsed")
             with c_done:
@@ -663,16 +738,20 @@ def render_items(items_df, can_edit, add_key):
             # Text style by status. The in-progress accent sits on the text cell
             # itself: the old .item-inprog wrapper was emitted as its own
             # st.markdown element, so it never enclosed the columns below it.
-            txt_style = "padding-top:6px; font-size:calc(15px * var(--fs-scale));"
+            txt_style = ("padding-top:6px; font-size:calc(15px * var(--fs-scale));"
+                         " line-height:var(--line-height);"
+                         " letter-spacing:var(--tracking);")
             if is_done:
-                txt_style += " color:#8E8E93;"
+                txt_style += " color:var(--muted-color); font-weight:var(--muted-weight);"
             elif is_prog:
-                txt_style += (" color:#1C1C1E; font-weight:500;"
+                txt_style += (" color:var(--item-color); font-weight:var(--item-weight);"
                               " border-left:3px solid #FF9500; padding-left:8px;")
+            else:
+                txt_style += " color:var(--item-color); font-weight:var(--item-weight);"
 
             c_n, c_txt, c_done, c_prog, c_edit, c_del = st.columns([0.4, 4.8, 1.2, 1.8, 0.8, 0.6])
             with c_n:
-                st.markdown(f'<div style="padding-top:8px;color:#8E8E93;font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="padding-top:8px;color:var(--muted-color);font-weight:var(--muted-weight);font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
                 st.markdown(f'<div style="{txt_style}">{linkify(row["item"])}</div>', unsafe_allow_html=True)
             with c_done:
