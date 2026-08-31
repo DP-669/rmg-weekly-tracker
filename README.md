@@ -34,6 +34,14 @@ The choice is stored in `localStorage`, so it survives quitting and relaunching
 the installed web app. It is per-device, not per-user: it is not written to the
 sheet and does not follow you to another iPad or browser.
 
+Beside it, `Aa` toggles high-legibility mode: near-black text at heavier
+weight, darker "done" rows and links, and more line spacing. It persists the
+same way and is independent of the size setting.
+
+Default contrast now clears WCAG AA everywhere; high-legibility clears AAA.
+Two values previously failed AA — "done" rows and row numbers at 3.3:1, and
+links at 4.0:1.
+
 Item text, names and numbering take the full scale. Control labels ("Done",
 "In progress", buttons) scale at half rate — rows are fixed-ratio columns, and
 at full scale "In progress" breaks one letter per line.
