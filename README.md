@@ -2,6 +2,25 @@
 Team weekly planner (Monday) and accomplishment tracker (Friday).
 Built with Streamlit + Google Sheets.
 
+## Layout
+- `core.py` — pure logic (weeks, item text, status, sort, retry, rollover). No
+  Streamlit, no network, so it can be tested directly.
+- `app.py` — the Streamlit page and the Google Sheets calls.
+- `tests/` — pytest over `core.py`.
+
+## Tests
+```
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q
+```
+They also run on every push and pull request via GitHub Actions.
+
+Each test corresponds to a bug that actually shipped — an unstable sort that
+reordered the list on every rerun, a status transition that sent unticked items
+to the wrong state, an error classifier that decides what is worth retrying, and
+the rollover de-duplication. The comments say which, so a regression fails with
+an explanation rather than a bare assertion.
+
 ## Setup
 1. Add Google Sheets credentials to `.streamlit/secrets.toml`
 2. Run: `streamlit run app.py`

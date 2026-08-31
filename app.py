@@ -5,36 +5,19 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 from datetime import date, timedelta
 import uuid
-import re
-import time
-import html
 
+from core import (
+    COLS,
+    format_week,
+    get_monday,
+    is_transient,
+    linkify,
+    next_status,
+    plan_rollover,
+    retry,
+    sort_items,
+)
 
-def linkify(text: str) -> str:
-    """Convert [label](url) and bare URLs to clickable HTML. Safe against double-conversion.
-
-    The result is written out with unsafe_allow_html, so the text is escaped first
-    — otherwise anything typed into an item would be rendered as live markup.
-    """
-    text = html.escape(str(text))
-    # Convert [label](url) markdown links first
-    text = re.sub(
-        r'\[([^\]]+)\]\((https?://[^\)\s]+)\)',
-        r'<a href="\2" target="_blank">\1</a>',
-        text
-    )
-    # Convert bare URLs — split around existing <a> tags so we never double-process
-    parts = re.split(r'(<a\b[^>]*>.*?</a>)', text, flags=re.DOTALL)
-    out = []
-    for i, part in enumerate(parts):
-        if i % 2 == 0:  # plain text node, not already inside an <a>
-            part = re.sub(
-                r'(https?://[^\s<>"\']+)',
-                r'<a href="\1" target="_blank">\1</a>',
-                part
-            )
-        out.append(part)
-    return ''.join(out)
 
 st.set_page_config(page_title="rMG Weekly", layout="wide", page_icon="📋")
 
@@ -359,48 +342,7 @@ TEAM        = ["Vesna", "Craig", "Damir"]
 RMG_PERSON  = "rMG"
 SCOPES      = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 SHEET_NAME  = "rMG Weekly Tracker"
-COLS        = ["id", "person", "week_start", "type", "item", "status", "created_at", "updated_at"]
-
-
-def get_monday(d: date) -> date:
-    return d - timedelta(days=d.weekday())
-
-
-def format_week(monday: date) -> str:
-    end = monday + timedelta(days=6)
-    return f"{monday.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
-
-
 # ── Google Sheets ─────────────────────────────────────────────────────────────
-# Google hands back these codes when it is busy or rate-limiting, not when
-# anything is wrong with the request. They are worth retrying; nothing else is.
-_TRANSIENT_CODES = {429, 500, 502, 503, 504}
-
-
-def _is_transient(err) -> bool:
-    """True for a retryable Google API failure. Accepts an exception or its string."""
-    resp = getattr(err, "response", None)
-    code = getattr(resp, "status_code", None)
-    if code is None:
-        code = getattr(err, "code", None)
-    if code in _TRANSIENT_CODES:
-        return True
-    # gspread stringifies as: APIError: [503]: The service is currently unavailable.
-    m = re.search(r"\[(\d{3})\]", str(err))
-    return bool(m) and int(m.group(1)) in _TRANSIENT_CODES
-
-
-def _retry(fn, attempts: int = 4, base: float = 0.6):
-    """Call fn(), retrying transient Google API errors with exponential backoff."""
-    for n in range(attempts):
-        try:
-            return fn()
-        except Exception as e:
-            if not _is_transient(e) or n == attempts - 1:
-                raise
-            time.sleep(base * (2 ** n))
-
-
 @st.cache_resource
 def _get_worksheet():
     try:
@@ -415,7 +357,7 @@ def _get_worksheet():
                 ws.insert_row(COLS, 1)
             return ws
 
-        return _retry(_open), None
+        return retry(_open), None
     except KeyError:
         return None, "setup"
     except Exception as e:
@@ -439,7 +381,7 @@ def load_data(_cache_key: str):
         ws, err = get_sheet()
         if err:
             return pd.DataFrame(columns=COLS), err
-        rows = _retry(ws.get_all_records)
+        rows = retry(ws.get_all_records)
         if not rows:
             return pd.DataFrame(columns=COLS), None
         df = pd.DataFrame(rows)
@@ -457,20 +399,20 @@ def invalidate_cache():
 
 def append_row(ws, row_dict: dict):
     values = [row_dict.get(c, "") for c in COLS]
-    _retry(lambda: ws.append_row(values, value_input_option="USER_ENTERED"))
+    retry(lambda: ws.append_row(values, value_input_option="USER_ENTERED"))
 
 
 def update_row(ws, row_id: str, field: str, value: str):
-    cell = _retry(lambda: ws.find(str(row_id), in_column=1))
+    cell = retry(lambda: ws.find(str(row_id), in_column=1))
     if cell:
-        _retry(lambda: ws.update_cell(cell.row, COLS.index(field) + 1, value))
-        _retry(lambda: ws.update_cell(cell.row, COLS.index("updated_at") + 1, date.today().isoformat()))
+        retry(lambda: ws.update_cell(cell.row, COLS.index(field) + 1, value))
+        retry(lambda: ws.update_cell(cell.row, COLS.index("updated_at") + 1, date.today().isoformat()))
 
 
 def delete_row(ws, row_id: str):
-    cell = _retry(lambda: ws.find(str(row_id), in_column=1))
+    cell = retry(lambda: ws.find(str(row_id), in_column=1))
     if cell:
-        _retry(lambda: ws.delete_rows(cell.row))
+        retry(lambda: ws.delete_rows(cell.row))
 
 
 # ── Session state ─────────────────────────────────────────────────────────────
@@ -492,21 +434,8 @@ def _do_rollover(current_week, current_week_str, force=False):
     last_week_str = (current_week - timedelta(weeks=1)).isoformat()
     invalidate_cache()
     df_all, _ = load_data("rollover")
-    existing = set()
-    if not df_all.empty:
-        dest = df_all[df_all["week_start"] == current_week_str]
-        for _, r in dest.iterrows():
-            existing.add((r["person"], str(r["item"]).strip().lower()))
-    carried = 0
-    skipped = 0
-    src = df_all[df_all["week_start"] == last_week_str] if not df_all.empty else pd.DataFrame(columns=COLS)
-    for _, row in src.iterrows():
-        if row["status"] == "done":
-            continue
-        key = (row["person"], str(row["item"]).strip().lower())
-        if key in existing:
-            skipped += 1
-            continue
+    to_carry, skipped = plan_rollover(df_all, last_week_str, current_week_str)
+    for row in to_carry:
         append_row(ws, {
             "id": str(uuid.uuid4())[:8],
             "person": row["person"],
@@ -517,8 +446,7 @@ def _do_rollover(current_week, current_week_str, force=False):
             "created_at": date.today().isoformat(),
             "updated_at": date.today().isoformat(),
         })
-        existing.add(key)
-        carried += 1
+    carried = len(to_carry)
     invalidate_cache()
     if force:
         if carried == 0 and skipped == 0:
@@ -670,7 +598,7 @@ if load_err == "setup":
 elif load_err:
     # Never leave a failure sitting in the data cache for the rest of its TTL.
     load_data.clear()
-    if _is_transient(load_err):
+    if is_transient(load_err):
         st.error("Google Sheets is temporarily unavailable. This is usually brief — retry in a moment.")
         st.caption(str(load_err))
     else:
@@ -686,14 +614,7 @@ week_df = df[df["week_start"] == current_week_str].copy() if not df.empty else p
 # ── Item renderer ─────────────────────────────────────────────────────────────
 def render_items(items_df, can_edit, add_key):
     """Render a list of items with numbering, status checkboxes, edit and delete."""
-    # Sort: in_progress → pending → done
-    if not items_df.empty:
-        _order = {"in_progress": 0, "pending": 1, "done": 2}
-        items_df = items_df.copy()
-        items_df["_s"] = items_df["status"].map(lambda s: _order.get(s, 1))
-        # Stable sort: items with the same status keep their sheet order instead of
-        # being reshuffled by quicksort on every rerun.
-        items_df = items_df.sort_values("_s", kind="stable").drop(columns=["_s"])
+    items_df = sort_items(items_df)
 
     for i, (_, row) in enumerate(items_df.iterrows(), 1):
         item_id  = row["id"]
@@ -774,15 +695,7 @@ def render_items(items_df, can_edit, add_key):
 
             # Status update
             if is_current_week:
-                # Exactly one checkbox can change per rerun, so resolve on the toggle
-                # rather than on the combination of both boxes.
-                if new_done != is_done:
-                    new_status = "done" if new_done else "pending"
-                elif new_prog != is_prog:
-                    new_status = "in_progress" if new_prog else "pending"
-                else:
-                    new_status = status
-
+                new_status = next_status(status, new_done, new_prog)
                 if new_status != status:
                     try:
                         ws, err = get_sheet()
