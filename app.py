@@ -210,7 +210,9 @@ input[type="checkbox"] { width: 16px !important; height: 16px !important; }
    scaled, so it stays a constant, findable size at every zoom level. */
 #rmg-fs-bar {
     position: fixed;
-    right: calc(12px + env(safe-area-inset-right, 0px));
+    /* Bottom LEFT on purpose. Streamlit Cloud pins its own "Manage app" toolbar
+       to the bottom right, and the two overlapped there. */
+    left: calc(12px + env(safe-area-inset-left, 0px));
     bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     z-index: 9999;
     display: flex;
