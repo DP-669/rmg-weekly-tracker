@@ -36,6 +36,15 @@ where the leverage is:
    wrong thing is more dangerous than no check, because it converts a doubt into
    a false certainty you then pass to the user.
 
+## "It keeps happening" means build the guarantee, not a better cleanup
+
+When someone reports a problem for the second time, or says they do not want to
+deal with it, a tool that helps them deal with it is the wrong deliverable. Find
+the structural change that makes the state unreachable — a key that makes a
+repeated write the same record, a constraint, an invariant enforced on read —
+and add automatic recovery behind it. A control that asks the user to notice and
+act is a last resort. They are telling you the noticing is the cost.
+
 ## Verify the artifact, not a proxy
 
 The most expensive single mistake in the record: reading a computed CSS property,
@@ -52,6 +61,14 @@ Verification has a ladder. Climb as high as the change warrants:
 | Integration against a fake | The wiring is right | Logic + I/O, when the fake is faithful |
 | Drive the real interface | The user-visible behaviour is right | Anything with a UI |
 | Look at the output | What the user actually sees | Anything visual — always |
+
+When a check covers a *set* of things — every colour, every row, every input —
+enumerate the set programmatically rather than the ones you happened to touch.
+Reporting "everything clears AA" after measuring six elements you remembered is a
+claim about a sample delivered as a claim about the page; the elements nobody
+remembered are exactly where the defect lives. A twenty-line script that walks
+the whole DOM settles it, is repeatable, and catches the regressions your own fix
+introduces.
 
 For visual work, **look at the picture**. Take the screenshot and read it. Do not
 substitute a numeric check for looking, and do not skip looking because the

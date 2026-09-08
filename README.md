@@ -21,6 +21,19 @@ to the wrong state, an error classifier that decides what is worth retrying, and
 the rollover de-duplication. The comments say which, so a regression fails with
 an explanation rather than a bare assertion.
 
+## Contrast audit
+```
+python -m streamlit run app.py --server.port 8600 &
+python tools/audit_contrast.py 8600
+```
+Walks every visible text element in all four combinations of the two display
+toggles and fails if any falls below its WCAG AA floor. It checks the DOM rather
+than a list of selectors, because the failures worth catching are the elements
+nobody remembered to style.
+
+Not wired into CI — it needs a browser and a running app with credentials. Run it
+after any change to the stylesheet.
+
 ## Setup
 1. Add Google Sheets credentials to `.streamlit/secrets.toml`
 2. Run: `streamlit run app.py`

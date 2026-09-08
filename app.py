@@ -133,6 +133,23 @@ st.markdown("""
     --link-color: #8FC7FF;      /* 10.6:1 */
 }
 
+/* Every piece of text in the app inherits the theme colour by default.
+   Enumerating selectors instead is how the person names and the week label ended
+   up at 1.68:1 on black: Streamlit colours its own widgets with rgb(49,51,63),
+   which is fine on white and invisible on the dark page, and any element nobody
+   thought to name kept it. Rules below with higher specificity — links, muted
+   rows, accents — still override this. */
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] * {
+    color: var(--item-color) !important;
+}
+/* The tick glyph is drawn with currentColor, so it must not follow the text
+   colour or it turns black-on-green in light mode. */
+[data-testid="stCheckbox"] svg,
+[data-testid="stCheckbox"] svg * {
+    color: #FFFFFF !important;
+}
+
 /* Links were #007AFF — 4.0:1, under the AA floor. */
 .block-container a { color: var(--link-color) !important; text-decoration: underline; }
 :root[data-legible="1"] .block-container a { font-weight: 600; }
@@ -249,7 +266,11 @@ body { font-size: calc(15px * var(--fs-scale)) !important; }
    Targeted by Streamlit's st-key-<key> container class: a wrapper <div> emitted
    through st.markdown renders in its own container and never encloses the
    widget that follows it, so the old .btn-edit descendant selector never matched. */
-[class*="st-key-edit_btn_"] button {
+/* The glyph inside is hidden so only the coloured circle shows. The rule has to
+   name the descendants too: a colour applied directly to a child beats one
+   inherited from the button. */
+[class*="st-key-edit_btn_"] button,
+[class*="st-key-edit_btn_"] button * {
     width: 24px !important;
     height: 24px !important;
     min-height: 24px !important;
@@ -799,13 +820,15 @@ def _handle_chat_add():
     week_start = get_monday(date.today()).isoformat()
     df_check, _ = load_data("chat_add")
     week_existing = df_check[df_check["week_start"] == week_start] if not df_check.empty else pd.DataFrame(columns=COLS)
+    new_id = item_id(add_to, item_text, week_start)
     already = any(
-        (r["person"] == add_to and str(r["item"]).strip().lower() == item_text.lower())
+        str(r["id"]) == new_id
+        or (r["person"] == add_to and str(r["item"]).strip().lower() == item_text.lower())
         for _, r in week_existing.iterrows()
     )
     if not already:
         append_row(ws, {
-            "id": str(uuid.uuid4())[:8],
+            "id": new_id,
             "person": add_to,
             "week_start": week_start,
             "type": "item",
@@ -875,42 +898,38 @@ with c_roll:
 if not is_current_week:
     st.caption("Viewing a past week — read only.")
 
-# ── Duplicate cleanup ─────────────────────────────────────────────────────────
-# Offered rather than done automatically: this deletes rows from a shared sheet,
-# and which copy is redundant is a judgement the three of you should confirm.
-_dupes = duplicate_ids(df_preview, current_week_str) if df_preview is not None else []
-if _dupes and is_current_week:
-    n = len(_dupes)
-    st.warning(f"{n} duplicate item{'s' if n != 1 else ''} in this week.")
-    if not st.session_state.get("confirm_dedupe", False):
-        if st.button(f"Remove {n} duplicate{'s' if n != 1 else ''}…"):
-            st.session_state["confirm_dedupe"] = True
-            st.rerun()
-    else:
-        st.caption(
-            "Keeps the first copy of each item — the one holding any edits and "
-            "status changes — and deletes the rest. Google Sheets keeps version "
-            "history (File ▸ Version history) if you want to undo it."
-        )
-        c_yes, c_no = st.columns([1, 1])
-        with c_yes:
-            if st.button(f"Delete {n}", type="primary", use_container_width=True):
-                try:
-                    ws, err = get_sheet()
-                    if err:
-                        st.error(f"Sheet error: {err}")
-                    else:
-                        removed = delete_rows_by_ids(ws, _dupes)
-                        invalidate_cache()
-                        st.session_state["confirm_dedupe"] = False
-                        st.success(f"Removed {removed}.")
-                        st.rerun()
-                except Exception as e:
-                    st.error(str(e))
-        with c_no:
-            if st.button("Cancel", use_container_width=True):
-                st.session_state["confirm_dedupe"] = False
-                st.rerun()
+# ── Duplicate self-healing ────────────────────────────────────────────────────
+# Every write path now derives its row id from the row's own content, so the same
+# item cannot be written twice. This is the backstop for anything already in the
+# sheet, or written by an older version: redundant copies are removed on sight
+# rather than reported for someone to deal with. The first copy of each item is
+# the survivor, so edits and status are preserved.
+def _heal_duplicates(df, week_str):
+    if df is None or df.empty:
+        return False
+    dupes = duplicate_ids(df, week_str)
+    if not dupes:
+        return False
+    flag = f"_healed_{week_str}"
+    if st.session_state.get(flag, False):
+        return False          # already tried this session; do not loop
+    st.session_state[flag] = True
+    try:
+        ws, err = get_sheet()
+        if err:
+            return False
+        removed = delete_rows_by_ids(ws, dupes)
+        invalidate_cache()
+        if removed:
+            st.toast(f"Removed {removed} duplicate row{'s' if removed != 1 else ''}.",
+                     icon="🧹")
+        return True
+    except Exception:
+        return False
+
+
+if is_current_week and _heal_duplicates(df_preview, current_week_str):
+    st.rerun()
 
 st.markdown("---")
 
@@ -957,7 +976,7 @@ def render_items(items_df, can_edit, add_key):
         if editing and can_edit:
             c_n, c_txt, c_done, c_prog, c_save, c_cancel = st.columns([0.35, 5.9, 1.15, 1.8, 0.75, 0.85])
             with c_n:
-                st.markdown(f'<div style="padding-top:8px;color:var(--muted-color);font-weight:var(--muted-weight);font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="padding-top:8px;color:var(--muted-color) !important;font-weight:var(--muted-weight);font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
                 edited_text = st.text_input("edit", value=row["item"], key=f"edit_val_{rk}", label_visibility="collapsed")
             with c_done:
@@ -990,16 +1009,17 @@ def render_items(items_df, can_edit, add_key):
                          " line-height:var(--line-height);"
                          " letter-spacing:var(--tracking);")
             if is_done:
-                txt_style += " color:var(--muted-color); font-weight:var(--muted-weight);"
+                txt_style += " color:var(--muted-color) !important; font-weight:var(--muted-weight);"
             elif is_prog:
-                txt_style += (" color:var(--item-color); font-weight:var(--item-weight);"
+                txt_style += (" color:var(--item-color) !important;"
+                              " font-weight:var(--item-weight);"
                               " border-left:3px solid var(--accent-orange); padding-left:8px;")
             else:
-                txt_style += " color:var(--item-color); font-weight:var(--item-weight);"
+                txt_style += " color:var(--item-color) !important; font-weight:var(--item-weight);"
 
             c_n, c_txt, c_done, c_prog, c_edit, c_del = st.columns([0.35, 5.9, 1.15, 1.8, 0.75, 0.55])
             with c_n:
-                st.markdown(f'<div style="padding-top:8px;color:var(--muted-color);font-weight:var(--muted-weight);font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="padding-top:8px;color:var(--muted-color) !important;font-weight:var(--muted-weight);font-size:calc(14px * var(--fs-scale));">{i}.</div>', unsafe_allow_html=True)
             with c_txt:
                 st.markdown(f'<div style="{txt_style}">{linkify(row["item"])}</div>', unsafe_allow_html=True)
             with c_done:
@@ -1051,15 +1071,17 @@ def render_items(items_df, can_edit, add_key):
                     st.error(f"Sheet error: {err}")
                 else:
                     person_label = add_key
+                    new_id = item_id(person_label, new_item, current_week_str)
                     already = any(
-                        str(r["item"]).strip().lower() == new_item.strip().lower()
+                        str(r["id"]) == new_id
+                        or str(r["item"]).strip().lower() == new_item.strip().lower()
                         for _, r in items_df.iterrows()
                     )
                     if already:
                         st.warning("Already on the list.")
                     else:
                         append_row(ws, {
-                            "id": str(uuid.uuid4())[:8],
+                            "id": new_id,
                             "person": person_label,
                             "week_start": current_week_str,
                             "type": "item",

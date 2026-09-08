@@ -134,3 +134,32 @@ authority.
 **Rule**: do not merge to a deploying branch without the owner's go-ahead. Push
 the branch, state what was verified and what was not, let them decide. Permission
 to ship one change is not permission for the next.
+
+
+### 2026-09-08 — dark mode shipped with text at 1.68:1, and duplicates still recurring
+**Context**: same tracker. Two reports in one message: names in the top bar
+almost invisible on the dark theme, and duplicate rows that the user does not
+want to manage at all.
+**Mechanism**: (a) theme colours were applied by enumerating selectors. Anything
+nobody thought to name kept Streamlit's default `rgb(49,51,63)` — fine on white,
+1.68:1 on black. Four elements: three radio labels and the week date. (b) Every
+write path minted a random id, so nothing at the data layer made a repeated
+write resolve to the same row; de-duplication was a banner the user had to
+notice, scroll to, and act on.
+**Why it escaped**: (a) the earlier contrast work measured the elements that had
+been *noticed* and reported "everything clears AA" — a claim about a sample,
+stated as a claim about the page. Two rounds of visual fixes had already been
+shipped and neither swept the whole DOM. (b) removing the duplicates was treated
+as the goal; not creating them was left to logic that could still be raced.
+**Rule**: two, and both are sharpenings of rules already here.
+*Reinforces "fix the class, not the instance"* — when the class is "text that
+kept a default colour", the only honest check enumerates the rendered DOM, not
+the selectors you wrote. Contrast is now audited by
+`tools/audit_contrast.py`, which walks every text node in all four theme
+combinations; it found the four failures immediately, and caught a regression
+the same fix introduced.
+*New*: when a user says they do not want to manage a recurring problem, the
+deliverable is that the problem cannot occur, not a better way to clean it up.
+Prefer a structural guarantee — here, ids derived from row content, so a repeated
+write is the same row — with automatic self-healing as the backstop. A control
+that asks the user to act is a last resort, not a solution.
