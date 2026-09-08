@@ -439,3 +439,46 @@ def test_duplicate_ids_ignores_other_weeks_and_claim_rows():
 def test_duplicate_ids_on_a_clean_week_is_empty():
     assert duplicate_ids(rows(("a", "Damir", THIS, "x", "pending")), THIS) == []
     assert duplicate_ids(rows(), THIS) == []
+
+
+# ── Blank type cells ──────────────────────────────────────────────────────────
+# Google Sheets returns "" for an empty cell. Rows added by hand in the
+# spreadsheet, or written before the app always set the column, have a blank
+# type. They are ordinary items and must be treated as such everywhere.
+
+def blank_type_rows(*specs):
+    return pd.DataFrame([{"id": i, "person": p, "week_start": w, "type": "",
+                          "item": it, "status": s, "created_at": w, "updated_at": w}
+                         for i, p, w, it, s in specs], columns=COLS)
+
+
+def test_blank_type_rows_are_still_items_for_dedupe():
+    df = blank_type_rows(("a", "Craig", THIS, "Work on Checklist", "in_progress"),
+                         ("b", "Craig", THIS, "Work on Checklist", "in_progress"))
+    assert duplicate_ids(df, THIS) == ["b"]
+
+
+def test_blank_type_rows_still_carry_over():
+    df = blank_type_rows(("s1", "Damir", LAST, "chase BMG", "pending"))
+    carry, _ = plan_rollover(df, LAST, THIS)
+    assert [c["item"] for c in carry] == ["chase BMG"]
+
+
+def test_a_blank_type_row_already_present_blocks_a_second_copy():
+    """The third duplication route: an existing blank-typed row was not seen as
+    present, so rollover carried a fresh copy in beside it."""
+    df = pd.concat([
+        blank_type_rows(("s1", "Damir", LAST, "chase BMG", "pending")),
+        blank_type_rows(("x1", "Damir", THIS, "chase BMG", "pending")),
+    ], ignore_index=True)
+    carry, skipped = plan_rollover(df, LAST, THIS)
+    assert carry == [] and skipped == 1
+
+
+def test_claim_rows_are_still_excluded_whatever_their_case():
+    df = pd.concat([
+        blank_type_rows(("a", "Damir", THIS, "real task", "pending")),
+        rows(("r1", "", THIS, "(marker)", "", "Rollover")),
+        rows(("r2", "", THIS, "(marker)", "", "rollover")),
+    ], ignore_index=True)
+    assert duplicate_ids(df, THIS) == []
