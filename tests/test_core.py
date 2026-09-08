@@ -12,7 +12,12 @@ import pandas as pd
 import pytest
 
 from core import (
+    CLAIM_TYPE,
     COLS,
+    carried_id,
+    claim_holder,
+    duplicate_ids,
+    rollover_claimed,
     format_week,
     get_monday,
     is_transient,
@@ -25,15 +30,14 @@ from core import (
 
 
 def rows(*specs):
-    """Build a frame from (id, person, week, item, status) tuples."""
-    return pd.DataFrame(
-        [
-            {"id": i, "person": p, "week_start": w, "type": "item",
-             "item": it, "status": s, "created_at": w, "updated_at": w}
-            for i, p, w, it, s in specs
-        ],
-        columns=COLS,
-    )
+    """Build a frame from (id, person, week, item, status[, type]) tuples."""
+    out = []
+    for spec in specs:
+        i, p, w, it, s = spec[:5]
+        t = spec[5] if len(spec) > 5 else "item"
+        out.append({"id": i, "person": p, "week_start": w, "type": t,
+                    "item": it, "status": s, "created_at": w, "updated_at": w})
+    return pd.DataFrame(out, columns=COLS)
 
 
 # ── Weeks ─────────────────────────────────────────────────────────────────────
@@ -338,3 +342,100 @@ def test_linkify_handles_several_links_in_one_item():
     out = linkify("[a](https://x.example) then https://y.example done")
     assert out.count("<a ") == 2
     assert "&lt;" not in out.replace("&lt;", "")  # no stray escaping artefacts
+
+
+# ── The duplicate-entries bug ─────────────────────────────────────────────────
+# Two independent mechanisms put duplicate rows in the live sheet. Both are
+# pinned here.
+
+def test_carried_id_is_deterministic_per_source_and_week():
+    assert carried_id("abc1234", THIS) == carried_id("abc1234", THIS)
+    assert carried_id("abc1234", THIS) != carried_id("abc1234", LAST)
+    assert carried_id("abc1234", THIS) != carried_id("zzz9999", THIS)
+    assert len(carried_id("abc1234", THIS)) == 8
+
+
+def test_editing_a_carried_item_does_not_resurrect_the_original():
+    """Mechanism one. De-duplication used to compare item text only. Reword a
+    carried item and the next rollover no longer recognises it, finds no match,
+    and carries the original across again — which is why one item appeared three
+    times while the rest appeared twice."""
+    src = rows(("src1", "Damir", LAST, "Dropbox organization - rMG account", "in_progress"))
+    carried, _ = plan_rollover(src, LAST, THIS)
+    assert len(carried) == 1
+
+    # it lands in this week, and then someone edits the wording
+    landed = rows(("src1", "Damir", LAST, "Dropbox organization - rMG account", "in_progress"),
+                  (carried[0]["id"], "Damir", THIS,
+                   "Dropbox organization - rMG account. Vesna added - decide on WIP",
+                   "in_progress"))
+    again, skipped = plan_rollover(landed, LAST, THIS)
+    assert again == [], "edited item was carried a second time"
+    assert skipped == 1
+
+
+def test_rollover_is_idempotent_however_many_times_it_runs():
+    df = rows(("s1", "Damir", LAST, "Lumina publishing UK taxes filing", "in_progress"),
+              ("s2", "Vesna", LAST, "Archive Air Hunger", "pending"))
+    for _ in range(5):
+        carry, _ = plan_rollover(df, LAST, THIS)
+        df = pd.concat([df, rows(*[(c["id"], c["person"], THIS, c["item"], c["status"])
+                                   for c in carry])], ignore_index=True)
+    landed = df[df["week_start"] == THIS]
+    assert len(landed) == 2, f"expected 2 carried rows, got {len(landed)}"
+
+
+def test_claim_row_marks_a_week_as_already_rolled():
+    """Mechanism two. session_state resets on every browser, tab and relaunch,
+    so it could not enforce 'once'; the claim row lives in the sheet."""
+    df = rows(("s1", "Damir", LAST, "a task", "pending"))
+    assert not rollover_claimed(df, THIS)
+    df = pd.concat([df, rows(("ro123456", "", THIS, "(marker)", "", CLAIM_TYPE))],
+                   ignore_index=True)
+    assert rollover_claimed(df, THIS)
+    assert not rollover_claimed(df, LAST)
+
+
+def test_two_sessions_racing_agree_on_one_winner():
+    """Both file a claim, both re-read, both compute the same holder — so one
+    stands down instead of carrying a second copy of everything."""
+    df = rows(("roBBB", "", THIS, "(marker)", "", CLAIM_TYPE),
+              ("roAAA", "", THIS, "(marker)", "", CLAIM_TYPE))
+    assert claim_holder(df, THIS) == "roAAA"
+    assert claim_holder(rows(), THIS) is None
+
+
+def test_claim_rows_are_never_carried_or_displayed_as_items():
+    df = rows(("s1", "Damir", LAST, "a real task", "pending"),
+              ("ro1", "", LAST, "(marker)", "", CLAIM_TYPE))
+    carry, _ = plan_rollover(df, LAST, THIS)
+    assert [c["item"] for c in carry] == ["a real task"]
+
+
+# ── duplicate_ids ─────────────────────────────────────────────────────────────
+def test_duplicate_ids_keeps_the_first_of_each_group():
+    df = rows(("a", "Damir", THIS, "Dropbox organization - rMG account", "in_progress"),
+              ("b", "Damir", THIS, "Dropbox organization - rMG account", "in_progress"),
+              ("c", "Damir", THIS, "Dropbox organization - rMG account", "in_progress"),
+              ("d", "Damir", THIS, "Lumina publishing UK taxes filing", "in_progress"))
+    assert duplicate_ids(df, THIS) == ["b", "c"]
+
+
+def test_duplicate_ids_is_per_person_and_case_insensitive():
+    df = rows(("a", "Damir", THIS, "Chase BMG", "pending"),
+              ("b", "Vesna", THIS, "Chase BMG", "pending"),
+              ("c", "Damir", THIS, "  chase bmg  ", "pending"))
+    assert duplicate_ids(df, THIS) == ["c"]
+
+
+def test_duplicate_ids_ignores_other_weeks_and_claim_rows():
+    df = rows(("a", "Damir", THIS, "x", "pending"),
+              ("b", "Damir", LAST, "x", "pending"),
+              ("r1", "", THIS, "(marker)", "", CLAIM_TYPE),
+              ("r2", "", THIS, "(marker)", "", CLAIM_TYPE))
+    assert duplicate_ids(df, THIS) == []
+
+
+def test_duplicate_ids_on_a_clean_week_is_empty():
+    assert duplicate_ids(rows(("a", "Damir", THIS, "x", "pending")), THIS) == []
+    assert duplicate_ids(rows(), THIS) == []

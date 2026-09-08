@@ -6,6 +6,7 @@ logic of exactly this shape: an unstable sort, a status transition that read the
 wrong inputs, an error classifier, and the rollover de-duplication.
 """
 
+import hashlib
 import html
 import re
 import time
@@ -133,34 +134,105 @@ def retry(fn, attempts: int = 4, base: float = 0.6, sleep=time.sleep):
 
 
 # ── Rollover ──────────────────────────────────────────────────────────────────
+ITEM_TYPE = "item"
+CLAIM_TYPE = "rollover"       # bookkeeping row, never displayed
+
+
 def dedupe_key(person, item):
     return (person, str(item).strip().lower())
+
+
+def carried_id(source_id, target_week_str: str) -> str:
+    """The id a row carried from `source_id` into `target_week_str` will get.
+
+    Deterministic on purpose. Text-only de-duplication cannot survive an edit:
+    once someone rewords a carried item, a later rollover no longer recognises
+    it, finds no match, and carries the original across a second time. Keying on
+    where the row came from is immune to that — the wording can change freely.
+    """
+    digest = hashlib.sha1(f"{source_id}|{target_week_str}".encode()).hexdigest()
+    return "c" + digest[:7]
+
+
+def _items(df, week_str):
+    """Rows of a week that are real items, excluding bookkeeping rows."""
+    wk = df[df["week_start"] == week_str]
+    if "type" in wk.columns:
+        wk = wk[wk["type"].fillna(ITEM_TYPE) == ITEM_TYPE]
+    return wk
+
+
+def rollover_claimed(df_all, week_str: str) -> bool:
+    """True if a claim row says the rollover into `week_str` already happened."""
+    if df_all is None or df_all.empty or "type" not in df_all.columns:
+        return False
+    return bool(
+        ((df_all["week_start"] == week_str) & (df_all["type"] == CLAIM_TYPE)).any()
+    )
+
+
+def claim_holder(df_all, week_str: str):
+    """Of all claims filed for `week_str`, the id that wins. Lowest id takes it.
+
+    Two sessions opening the app seconds apart can both find the week empty and
+    both start carrying. Each files a claim and then re-reads; whoever is not the
+    holder stands down. Deterministic so both sides reach the same verdict.
+    """
+    if df_all is None or df_all.empty or "type" not in df_all.columns:
+        return None
+    claims = df_all[(df_all["week_start"] == week_str) & (df_all["type"] == CLAIM_TYPE)]
+    ids = sorted(str(i) for i in claims["id"].tolist())
+    return ids[0] if ids else None
 
 
 def plan_rollover(df_all, last_week_str: str, current_week_str: str):
     """Decide what last week's leftovers should add to this week.
 
-    Returns (to_carry, skipped): the rows to append, and how many were already
-    present. Done items never carry. De-duplication is per person on normalised
-    item text, and counts rows carried earlier in the same pass, so running a
-    rollover twice adds nothing the second time.
+    Returns (to_carry, skipped): rows to append — each already carrying the id it
+    should be written with — and how many were already present. Done items never
+    carry. A row is considered already present if this week holds either its
+    carried id or an item with the same normalised text for that person.
     """
     if df_all is None or df_all.empty:
         return [], 0
 
-    existing = {
-        dedupe_key(r["person"], r["item"])
-        for _, r in df_all[df_all["week_start"] == current_week_str].iterrows()
-    }
+    destination = _items(df_all, current_week_str)
+    existing_text = {dedupe_key(r["person"], r["item"]) for _, r in destination.iterrows()}
+    existing_ids = {str(i) for i in destination["id"].tolist()}
 
     to_carry, skipped = [], 0
-    for _, row in df_all[df_all["week_start"] == last_week_str].iterrows():
+    for _, row in _items(df_all, last_week_str).iterrows():
         if row["status"] == "done":
             continue
+        new_id = carried_id(row["id"], current_week_str)
         key = dedupe_key(row["person"], row["item"])
-        if key in existing:
+        if new_id in existing_ids or key in existing_text:
             skipped += 1
             continue
-        to_carry.append({"person": row["person"], "item": row["item"], "status": row["status"]})
-        existing.add(key)
+        to_carry.append({
+            "id": new_id,
+            "person": row["person"],
+            "item": row["item"],
+            "status": row["status"],
+        })
+        existing_ids.add(new_id)
+        existing_text.add(key)
     return to_carry, skipped
+
+
+def duplicate_ids(df_all, week_str: str):
+    """Ids of redundant copies in `week_str`, keeping the first of each group.
+
+    Grouped per person on normalised item text, in sheet order, so the oldest
+    copy — the one carrying any edits and status changes — is the survivor.
+    """
+    if df_all is None or df_all.empty:
+        return []
+    seen, dupes = set(), []
+    for _, row in _items(df_all, week_str).iterrows():
+        key = dedupe_key(row["person"], row["item"])
+        if key in seen:
+            dupes.append(str(row["id"]))
+        else:
+            seen.add(key)
+    return dupes
