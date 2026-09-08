@@ -17,6 +17,7 @@ from core import (
     carried_id,
     claim_holder,
     duplicate_ids,
+    item_id,
     rollover_claimed,
     format_week,
     get_monday,
@@ -482,3 +483,43 @@ def test_claim_rows_are_still_excluded_whatever_their_case():
         rows(("r2", "", THIS, "(marker)", "", "rollover")),
     ], ignore_index=True)
     assert duplicate_ids(df, THIS) == []
+
+
+# ── Idempotent writes ─────────────────────────────────────────────────────────
+# Random ids let the same item be written twice. Deriving the id from the
+# content means a repeated write resolves to the same row.
+
+def test_item_id_is_the_same_for_the_same_item():
+    a = item_id("Damir", "Work on Checklist", THIS)
+    b = item_id("Damir", "Work on Checklist", THIS)
+    assert a == b and len(a) == 8
+
+
+def test_item_id_ignores_case_and_padding():
+    assert item_id("Damir", "  Work On Checklist  ", THIS) == \
+           item_id("Damir", "work on checklist", THIS)
+
+
+def test_item_id_separates_people_and_weeks():
+    assert item_id("Damir", "x", THIS) != item_id("Vesna", "x", THIS)
+    assert item_id("Damir", "x", THIS) != item_id("Damir", "x", LAST)
+
+
+def test_item_id_does_not_collide_with_carried_ids():
+    """Different prefixes, so a manually added row and a carried row can never
+    be mistaken for one another."""
+    assert item_id("Damir", "x", THIS)[0] == "i"
+    assert carried_id("src", THIS)[0] == "c"
+
+
+def test_duplicate_ids_finds_everything_a_heal_pass_must_remove():
+    """The self-healing pass deletes exactly what this returns, so it must catch
+    duplicates regardless of type cell, case or padding."""
+    df = pd.concat([
+        rows(("a", "Craig", THIS, "Work on Checklist", "in_progress")),
+        blank_type_rows(("b", "Craig", THIS, " work on checklist ", "in_progress")),
+        rows(("c", "Craig", THIS, "Work on Checklist", "done")),
+        rows(("d", "Craig", THIS, "Something else", "pending")),
+        rows(("r", "", THIS, "(marker)", "", CLAIM_TYPE)),
+    ], ignore_index=True)
+    assert duplicate_ids(df, THIS) == ["b", "c"]

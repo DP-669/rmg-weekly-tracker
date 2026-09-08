@@ -154,6 +154,19 @@ def carried_id(source_id, target_week_str: str) -> str:
     return "c" + digest[:7]
 
 
+def item_id(person, item_text, week_str: str) -> str:
+    """The id a manually added item gets.
+
+    Derived from who, what and which week rather than random, so submitting the
+    same text twice — a double tap, a retried request, two people typing the same
+    thing — resolves to one row instead of two. An id that identifies the content
+    is what makes a write idempotent when the store itself has no unique index.
+    """
+    person, text = dedupe_key(person, item_text)
+    digest = hashlib.sha1(f"{person}|{text}|{week_str}".encode()).hexdigest()
+    return "i" + digest[:7]
+
+
 def _items(df, week_str):
     """Rows of a week that are real items — everything that is not bookkeeping.
 
