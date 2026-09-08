@@ -1102,13 +1102,15 @@ for person in TEAM:   # Vesna, Craig, Damir
     is_me = (person == active_user)
     if is_me:
         st.markdown('<div class="my-expander">', unsafe_allow_html=True)
-    with st.expander(person, expanded=True):
+    # Collapsed by default: the landing view is a clean list of who to open,
+    # not every task at once.
+    with st.expander(person, expanded=False):
         person_items = week_df[week_df["person"] == person] if not week_df.empty else pd.DataFrame(columns=COLS)
         render_items(person_items, can_edit=(is_me and is_current_week), add_key=person)
     if is_me:
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ── rMG section ───────────────────────────────────────────────────────────────
-with st.expander("rMG", expanded=True):
+with st.expander("rMG", expanded=False):
     rmg_items = week_df[week_df["person"] == RMG_PERSON] if not week_df.empty else pd.DataFrame(columns=COLS)
     render_items(rmg_items, can_edit=is_current_week, add_key=RMG_PERSON)
