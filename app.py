@@ -29,6 +29,7 @@ try:
         format_week,
         get_monday,
         is_transient,
+        item_id,
         linkify,
         next_status,
         plan_rollover,
@@ -961,14 +962,17 @@ def render_items(items_df, can_edit, add_key):
     items_df = sort_items(items_df)
 
     for i, (_, row) in enumerate(items_df.iterrows(), 1):
-        item_id  = row["id"]
+        # Named row_id, not item_id: item_id is the imported function that derives
+        # an id for a new row, and a loop variable of that name shadowed it — the
+        # add-item box then raised "'str' object is not callable".
+        row_id   = row["id"]
         status   = row.get("status", "pending")
         # Widget keys must be unique even if two sheet rows share the same id —
-        # section name + position guarantees that; item_id kept for readability.
+        # section name + position guarantees that; row_id kept for readability.
         # The status is part of the key too: Streamlit ignores the `value=` argument
         # once a key exists in session_state, so a key that outlives a status change
         # would keep showing the pre-change checkbox state.
-        rk       = f"{add_key}_{i}_{item_id}_{status}"
+        rk       = f"{add_key}_{i}_{row_id}_{status}"
         is_done  = (status == "done")
         is_prog  = (status == "in_progress")
         editing  = st.session_state.get(f"edit_{rk}", False)
@@ -988,7 +992,7 @@ def render_items(items_df, can_edit, add_key):
                     try:
                         ws, err = get_sheet()
                         if not err and edited_text:
-                            update_row(ws, item_id, "item", edited_text)
+                            update_row(ws, row_id, "item", edited_text)
                             invalidate_cache()
                         st.session_state[f"edit_{rk}"] = False
                         st.session_state.pop(f"edit_val_{rk}", None)
@@ -1036,7 +1040,7 @@ def render_items(items_df, can_edit, add_key):
                     try:
                         ws, err = get_sheet()
                         if not err:
-                            delete_row(ws, item_id)
+                            delete_row(ws, row_id)
                             invalidate_cache()
                             st.rerun()
                     except Exception as e:
@@ -1049,7 +1053,7 @@ def render_items(items_df, can_edit, add_key):
                     try:
                         ws, err = get_sheet()
                         if not err:
-                            update_row(ws, item_id, "status", new_status)
+                            update_row(ws, row_id, "status", new_status)
                             invalidate_cache()
                             st.rerun()
                     except Exception as e:

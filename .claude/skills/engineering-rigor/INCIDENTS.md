@@ -178,3 +178,22 @@ and the user then acts on a wrong picture.
 replies short: result, problems, what is needed. Detail on request only. Length
 spent explaining reasoning is length the reader spends finding the one fact that
 changes what they do.
+
+---
+
+### 2026-09-08 — add-item box broke: "'str' object is not callable"
+**Context**: adding `item_id()` to make writes idempotent.
+**Mechanism**: two faults stacked. The edit that was supposed to add `item_id`
+to app.py's import list used a plain `str.replace` whose pattern did not match
+the file's actual indentation, so it silently changed nothing. The name then
+resolved to a loop-local `item_id = row["id"]` — a string — and calling it
+raised. In the other call site, outside that loop, it was simply undefined.
+**Why it escaped**: unit tests import `core`, never the Streamlit script, so
+nothing exercised app.py at all. The browser checks that were run drove display
+and de-duplication but never typed into the add box — the one path the change
+was actually for. `pyflakes app.py` reports it in under a second.
+**Rule**: three. An edit that must match existing text needs an assertion that it
+matched; a silent no-op edit is worse than a crash. Exercise the path the change
+is *for*, not the paths that are easy to drive. And a linter that sees the file
+your tests never import is cheap coverage for exactly the gap between them —
+pyflakes now runs in CI over app.py.
