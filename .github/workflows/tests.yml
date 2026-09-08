@@ -14,4 +14,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt -r requirements-dev.txt
+      # Catches undefined and shadowed names in app.py, which the unit tests
+      # cannot: they import core, never the Streamlit script. A missing import
+      # of item_id shipped and broke the add-item box; this would have caught it.
+      - run: python -m pyflakes app.py core.py tools/
       - run: python -m pytest tests/ -q
