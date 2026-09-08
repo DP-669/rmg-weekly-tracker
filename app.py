@@ -1,3 +1,5 @@
+import importlib
+
 import streamlit as st
 import streamlit.components.v1 as components
 import gspread
@@ -6,21 +8,44 @@ import pandas as pd
 from datetime import date, timedelta
 import uuid
 
-from core import (
-    CLAIM_TYPE,
-    COLS,
-    claim_holder,
-    duplicate_ids,
-    format_week,
-    get_monday,
-    is_transient,
-    linkify,
-    next_status,
-    plan_rollover,
-    retry,
-    rollover_claimed,
-    sort_items,
-)
+# Streamlit re-runs this script on every interaction but keeps imported local
+# modules in sys.modules. After a deploy that changes core.py, the process can
+# still be holding the previous version, and any name added in the same commit
+# fails to import until someone reboots the app — which is what took the app
+# down after the rollover fix. Reloading from disk first makes that impossible.
+import core as _core
+
+try:
+    importlib.reload(_core)
+except Exception:
+    pass  # a fresh process has nothing stale to reload
+
+try:
+    from core import (
+        CLAIM_TYPE,
+        COLS,
+        claim_holder,
+        duplicate_ids,
+        format_week,
+        get_monday,
+        is_transient,
+        linkify,
+        next_status,
+        plan_rollover,
+        retry,
+        rollover_claimed,
+        sort_items,
+    )
+except ImportError as exc:
+    # Never let this surface as Streamlit Cloud's redacted traceback: say what
+    # to do about it.
+    st.set_page_config(page_title="rMG Weekly", page_icon="📋")
+    st.error(
+        "The app is running a stale copy of its code and needs a restart.\n\n"
+        "Open **Manage app** (bottom right) and choose **Reboot app**."
+    )
+    st.caption(str(exc))
+    st.stop()
 
 
 st.set_page_config(page_title="rMG Weekly", layout="wide", page_icon="📋")
