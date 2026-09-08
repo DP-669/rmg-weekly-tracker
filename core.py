@@ -155,10 +155,20 @@ def carried_id(source_id, target_week_str: str) -> str:
 
 
 def _items(df, week_str):
-    """Rows of a week that are real items, excluding bookkeeping rows."""
+    """Rows of a week that are real items — everything that is not bookkeeping.
+
+    Defined as "not a claim row" rather than "type == item" on purpose. Google
+    Sheets returns "" for an empty cell, so any row added by hand in the
+    spreadsheet, or written before the app always set this column, carries a
+    blank type. Requiring type == "item" made those rows invisible both to
+    de-duplication and to rollover — which is itself a way to produce
+    duplicates, since a blank-typed row already in the week was not recognised
+    and a fresh copy got carried in beside it.
+    """
     wk = df[df["week_start"] == week_str]
     if "type" in wk.columns:
-        wk = wk[wk["type"].fillna(ITEM_TYPE) == ITEM_TYPE]
+        kind = wk["type"].fillna("").astype(str).str.strip().str.lower()
+        wk = wk[kind != CLAIM_TYPE]
     return wk
 
 
