@@ -45,6 +45,16 @@ repeated write the same record, a constraint, an invariant enforced on read —
 and add automatic recovery behind it. A control that asks the user to notice and
 act is a last resort. They are telling you the noticing is the cost.
 
+## Say the blocking fact first, and stop
+
+A reply that buries "this is not live yet" under a description of the work gets
+skipped, and the reader acts on a wrong picture — in the record, a user rebooted
+a production app to collect a fix that was still sitting in an unmerged branch.
+
+Lead with status: shipped, blocked, or waiting on you. Then results, then what
+you need. Detail on request. Length reads as thoroughness to the writer and as
+noise to the reader, and the cost lands on them.
+
 ## Verify the artifact, not a proxy
 
 The most expensive single mistake in the record: reading a computed CSS property,

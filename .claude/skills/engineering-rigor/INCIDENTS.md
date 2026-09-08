@@ -163,3 +163,18 @@ deliverable is that the problem cannot occur, not a better way to clean it up.
 Prefer a structural guarantee — here, ids derived from row content, so a repeated
 write is the same row — with automatic self-healing as the backstop. A control
 that asks the user to act is a last resort, not a solution.
+
+---
+
+### 2026-09-08 — a fix sat unmerged because the message buried it
+**Context**: a verified fix left in a PR behind a review gate.
+**Mechanism**: the reply opened with "not merged — say the word", then three
+sections describing the fix in detail. The user reasonably read it as shipped,
+rebooted the app, and saw the same broken screen.
+**Why it escaped**: the status was accurate and present. It was buried under
+length, so it was never read. Long replies are not thorough, they are unread —
+and the user then acts on a wrong picture.
+**Rule**: state blocked-or-not-live in the first line, alone. And by default keep
+replies short: result, problems, what is needed. Detail on request only. Length
+spent explaining reasoning is length the reader spends finding the one fact that
+changes what they do.
