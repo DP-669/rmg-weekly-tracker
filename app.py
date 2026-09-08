@@ -7,7 +7,10 @@ from datetime import date, timedelta
 import uuid
 
 from core import (
+    CLAIM_TYPE,
     COLS,
+    claim_holder,
+    duplicate_ids,
     format_week,
     get_monday,
     is_transient,
@@ -15,6 +18,7 @@ from core import (
     next_status,
     plan_rollover,
     retry,
+    rollover_claimed,
     sort_items,
 )
 
@@ -615,6 +619,19 @@ def update_row(ws, row_id: str, field: str, value: str):
         retry(lambda: ws.update_cell(cell.row, COLS.index("updated_at") + 1, date.today().isoformat()))
 
 
+def delete_rows_by_ids(ws, ids):
+    """Delete several rows in one pass: one read for the id column, then one
+    delete per row, bottom-up so the earlier indices stay valid."""
+    if not ids:
+        return 0
+    col = retry(lambda: ws.col_values(1))
+    wanted = set(str(i) for i in ids)
+    targets = sorted((n for n, v in enumerate(col, start=1) if str(v) in wanted), reverse=True)
+    for idx in targets:
+        retry(lambda i=idx: ws.delete_rows(i))
+    return len(targets)
+
+
 def delete_row(ws, row_id: str):
     cell = retry(lambda: ws.find(str(row_id), in_column=1))
     if cell:
@@ -643,7 +660,7 @@ def _do_rollover(current_week, current_week_str, force=False):
     to_carry, skipped = plan_rollover(df_all, last_week_str, current_week_str)
     for row in to_carry:
         append_row(ws, {
-            "id": str(uuid.uuid4())[:8],
+            "id": row["id"],
             "person": row["person"],
             "week_start": current_week_str,
             "type": "item",
@@ -665,19 +682,46 @@ def _do_rollover(current_week, current_week_str, force=False):
     return carried, skipped
 
 
+def _file_claim(ws, current_week_str: str) -> str:
+    """Record an intent to roll over into this week. Returns the claim id."""
+    claim = "ro" + str(uuid.uuid4())[:6]
+    append_row(ws, {
+        "id": claim,
+        "person": "",
+        "week_start": current_week_str,
+        "type": CLAIM_TYPE,
+        "item": "(rollover marker — safe to ignore)",
+        "status": "",
+        "created_at": date.today().isoformat(),
+        "updated_at": date.today().isoformat(),
+    })
+    invalidate_cache()
+    return claim
+
+
 def _auto_rollover_if_needed(current_week, current_week_str):
-    """Auto-carry on first load of a new week if current week is empty and last week has items."""
+    """Auto-carry last week's leftovers, at most once per week.
+
+    session_state alone cannot enforce "once": every browser, tab and relaunch
+    starts with an empty one, so the only real guard was "this week already has
+    rows" — which is false for everyone who loads the app during the seconds the
+    first roller is still writing. Three people opening on Monday morning is
+    exactly that. The claim row records the decision in the sheet, where every
+    session can see it.
+    """
     if get_monday(date.today()) != current_week:
         return
     flag = f"_auto_ro_{current_week_str}"
     if st.session_state.get(flag, False):
         return
+
+    invalidate_cache()
     df_check, check_err = load_data("auto_check")
     if check_err:
         # Sheet unreachable — leave the flag unset so this runs once it recovers,
         # rather than recording a rollover that never happened.
         return
-    if df_check.empty:
+    if df_check.empty or rollover_claimed(df_check, current_week_str):
         st.session_state[flag] = True
         return
     if (df_check["week_start"] == current_week_str).any():
@@ -687,7 +731,17 @@ def _auto_rollover_if_needed(current_week, current_week_str):
     if not (df_check["week_start"] == last_week_str).any():
         st.session_state[flag] = True
         return
+
     try:
+        ws, err = get_sheet()
+        if err:
+            return
+        mine = _file_claim(ws, current_week_str)
+        # Re-read: if someone else filed a claim in the meantime, they carry.
+        df_after, _ = load_data("claim_check")
+        if claim_holder(df_after, current_week_str) != mine:
+            st.session_state[flag] = True
+            return
         carried, _ = _do_rollover(current_week, current_week_str, force=False)
         if carried > 0:
             st.toast(f"Auto-carried {carried} items from last week.", icon="🔄")
@@ -750,6 +804,9 @@ is_current_week  = (current_week == get_monday(date.today()))
 _handle_chat_add()
 _auto_rollover_if_needed(current_week, current_week_str)
 
+# Read once up front so the duplicate banner can render above the week's lists.
+df_preview, _preview_err = load_data(current_week_str)
+
 
 # ── TOP BAR ───────────────────────────────────────────────────────────────────
 c_user, c_week, c_roll = st.columns([4, 3, 2])
@@ -792,6 +849,43 @@ with c_roll:
 
 if not is_current_week:
     st.caption("Viewing a past week — read only.")
+
+# ── Duplicate cleanup ─────────────────────────────────────────────────────────
+# Offered rather than done automatically: this deletes rows from a shared sheet,
+# and which copy is redundant is a judgement the three of you should confirm.
+_dupes = duplicate_ids(df_preview, current_week_str) if df_preview is not None else []
+if _dupes and is_current_week:
+    n = len(_dupes)
+    st.warning(f"{n} duplicate item{'s' if n != 1 else ''} in this week.")
+    if not st.session_state.get("confirm_dedupe", False):
+        if st.button(f"Remove {n} duplicate{'s' if n != 1 else ''}…"):
+            st.session_state["confirm_dedupe"] = True
+            st.rerun()
+    else:
+        st.caption(
+            "Keeps the first copy of each item — the one holding any edits and "
+            "status changes — and deletes the rest. Google Sheets keeps version "
+            "history (File ▸ Version history) if you want to undo it."
+        )
+        c_yes, c_no = st.columns([1, 1])
+        with c_yes:
+            if st.button(f"Delete {n}", type="primary", use_container_width=True):
+                try:
+                    ws, err = get_sheet()
+                    if err:
+                        st.error(f"Sheet error: {err}")
+                    else:
+                        removed = delete_rows_by_ids(ws, _dupes)
+                        invalidate_cache()
+                        st.session_state["confirm_dedupe"] = False
+                        st.success(f"Removed {removed}.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+        with c_no:
+            if st.button("Cancel", use_container_width=True):
+                st.session_state["confirm_dedupe"] = False
+                st.rerun()
 
 st.markdown("---")
 
