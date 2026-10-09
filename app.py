@@ -33,6 +33,7 @@ try:
         linkify,
         next_status,
         plan_rollover,
+        rollover_source_week,
         retry,
         rollover_claimed,
         sort_items,
@@ -701,10 +702,15 @@ def _do_rollover(current_week, current_week_str, force=False):
     if err:
         st.error(f"Sheet error: {err}")
         return 0, 0
-    last_week_str = (current_week - timedelta(weeks=1)).isoformat()
     invalidate_cache()
     df_all, _ = load_data("rollover")
-    to_carry, skipped = plan_rollover(df_all, last_week_str, current_week_str)
+    # Carry from the last week anyone used, not strictly the week before: a
+    # skipped week must not strand everyone's open tasks.
+    source_week_str = rollover_source_week(df_all, current_week_str)
+    if source_week_str is None:
+        to_carry, skipped = [], 0
+    else:
+        to_carry, skipped = plan_rollover(df_all, source_week_str, current_week_str)
     for row in to_carry:
         append_row(ws, {
             "id": row["id"],
@@ -774,8 +780,7 @@ def _auto_rollover_if_needed(current_week, current_week_str):
     if (df_check["week_start"] == current_week_str).any():
         st.session_state[flag] = True
         return
-    last_week_str = (current_week - timedelta(weeks=1)).isoformat()
-    if not (df_check["week_start"] == last_week_str).any():
+    if rollover_source_week(df_check, current_week_str) is None:
         st.session_state[flag] = True
         return
 
