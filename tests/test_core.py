@@ -25,6 +25,7 @@ from core import (
     linkify,
     next_status,
     plan_rollover,
+    rollover_source_week,
     retry,
     sort_items,
 )
@@ -523,3 +524,46 @@ def test_duplicate_ids_finds_everything_a_heal_pass_must_remove():
         rows(("r", "", THIS, "(marker)", "", CLAIM_TYPE)),
     ], ignore_index=True)
     assert duplicate_ids(df, THIS) == ["b", "c"]
+
+
+# ── rollover_source_week ──────────────────────────────────────────────────────
+# Shipped bug: rollover only looked at the week immediately before. Nobody
+# opened the app for a week, that week was empty, and every open task stayed
+# stranded in mid-September; the tracker looked wiped.
+
+def test_source_is_previous_week_when_it_has_items():
+    df = rows(("1", "Damir", "2026-09-07", "a", "pending"),
+              ("2", "Damir", "2026-09-14", "b", "pending"))
+    assert rollover_source_week(df, "2026-09-21") == "2026-09-14"
+
+
+def test_source_skips_empty_weeks():
+    df = rows(("1", "Damir", "2026-09-07", "a", "pending"),
+              ("2", "Damir", "2026-09-14", "b", "pending"))
+    assert rollover_source_week(df, "2026-10-05") == "2026-09-14"
+
+
+def test_source_ignores_current_and_future_weeks_and_claim_rows():
+    df = rows(("1", "Damir", "2026-09-14", "a", "pending"),
+              ("2", "Vesna", "2026-10-05", "b", "pending"),
+              ("ro1", "", "2026-09-28", "(marker)", "", CLAIM_TYPE))
+    assert rollover_source_week(df, "2026-10-05") == "2026-09-14"
+
+
+def test_source_is_none_without_earlier_items():
+    df = rows(("1", "Damir", "2026-10-05", "a", "pending"))
+    assert rollover_source_week(df, "2026-10-05") is None
+
+
+def test_gap_rollover_carries_open_work_and_keeps_retyped_items():
+    """End to end for the reported case: a two-week gap, Vesna re-typed one
+    task by hand. Open work arrives, done work stays behind, nothing is
+    duplicated and nothing already in the week is touched."""
+    df = rows(("1", "Damir", "2026-09-14", "Lumina taxes", "in_progress"),
+              ("2", "Vesna", "2026-09-14", "Register rC057", "done"),
+              ("3", "Vesna", "2026-09-14", "SSC album", "in_progress"),
+              ("4", "Vesna", "2026-10-05", "SSC album", "in_progress"))
+    src = rollover_source_week(df, "2026-10-05")
+    carry, skipped = plan_rollover(df, src, "2026-10-05")
+    assert [(c["person"], c["item"]) for c in carry] == [("Damir", "Lumina taxes")]
+    assert skipped == 1

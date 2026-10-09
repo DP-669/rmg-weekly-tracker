@@ -208,6 +208,26 @@ def claim_holder(df_all, week_str: str):
     return ids[0] if ids else None
 
 
+def rollover_source_week(df_all, current_week_str: str):
+    """The week a rollover into `current_week_str` should carry from.
+
+    Normally the week before. But if nobody opened the app for a week, that week
+    is empty, and carrying only from it carried nothing: every open task stayed
+    stranded in the last week anyone used, and the tracker looked wiped. So
+    carry from the most recent earlier week that holds any items instead.
+    Returns None when there is no earlier week with items.
+    """
+    if df_all is None or df_all.empty:
+        return None
+    earlier = df_all
+    if "type" in earlier.columns:
+        kind = earlier["type"].fillna("").astype(str).str.strip().str.lower()
+        earlier = earlier[kind != CLAIM_TYPE]
+    weeks = earlier["week_start"].astype(str)
+    weeks = weeks[(weeks < current_week_str) & (weeks.str.strip() != "")]
+    return weeks.max() if not weeks.empty else None
+
+
 def plan_rollover(df_all, last_week_str: str, current_week_str: str):
     """Decide what last week's leftovers should add to this week.
 
